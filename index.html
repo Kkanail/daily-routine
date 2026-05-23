@@ -9,6 +9,12 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="每日打卡">
+  <meta name="theme-color" content="#1a1a2e">
+  <link rel="apple-touch-icon" href="icon-192.png">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: linear-gradient(160deg, #f8f6ff 0%, #eaf4fd 55%, #fff9e6 100%); min-height: 100vh; font-family: 'Noto Sans TC', sans-serif; }
@@ -200,6 +206,13 @@
     }
 
     ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js');
+      });
+    }
   </script>
 </body>
 </html>
