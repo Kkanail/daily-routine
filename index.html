@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>每日例行事項</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: linear-gradient(160deg, #f8f6ff 0%, #eaf4fd 55%, #fff9e6 100%); min-height: 100vh; font-family: 'Noto Sans TC', sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useCallback, useRef, useEffect } = React;
+
+    // ── 設定區 ── 只有這裡有敏感資訊 ────────────────────────────────────────
+    const FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSekRQmm1xtrei2I7SHmP9aEN_b-tjPPLpePa4uWNdvVZ7MqdQ/formResponse";
+    const ENTRY = {
+      date:  "entry.1833681731",
+      label: "entry.2004924142",
+      done:  "entry.413507961",
+      note:  "entry.1751193673",
+    };
+    // ────────────────────────────────────────────────────────────────────────
+
+    const INITIAL_TASKS = [
+      { id: "1",  label: "吃異位寧",          icon: "💊" },
+      { id: "2a", label: "胖貓早藥",          icon: "🐱" },
+      { id: "3",  label: "吃益生菌",          icon: "🌿" },
+      { id: "4",  label: "紅外線復健 🦶",     icon: "🔴" },
+      { id: "5",  label: "美容儀",            icon: "✨" },
+      { id: "6",  label: "澆花",              icon: "🌸" },
+      { id: "7",  label: "讀書 / 練習英文",   icon: "📚" },
+      { id: "8",  label: "復健小插畫",        icon: "🎨" },
+      { id: "9",  label: "閉氣練習",          icon: "🫁" },
+      { id: "10", label: "做作品集 / AI課程", icon: "💻" },
+      { id: "11", label: "瑜伽",              icon: "🧘" },
+      { id: "2b", label: "胖貓晚藥",          icon: "🐱" },
+      { id: "12", label: "日摘記錄",          icon: "✍️" },
+    ];
+
+    function getTodayKey() {
+      const now = new Date();
+      if (now.getHours() < 5) now.setDate(now.getDate() - 1);
+      return now.toISOString().slice(0, 10);
+    }
+    function formatDate(s) {
+      return new Date(s + "T00:00:00").toLocaleDateString("zh-TW", { month: "long", day: "numeric", weekday: "long" });
+    }
+    function loadLS(key, fallback) {
+      try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+    }
+    function saveLS(key, value) {
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+    }
+
+    function syncRow(date, label, done, note) {
+      const params = new URLSearchParams({
+        [ENTRY.date]:  date,
+        [ENTRY.label]: label,
+        [ENTRY.done]:  String(done),
+        [ENTRY.note]:  note || "",
+      });
+      const img = new Image();
+      img.src = `${FORM_URL}?${params}`;
+    }
+
+    function NotePopup({ task, existingNote, onSubmit, onClose }) {
+      const [note, setNote] = useState(existingNote || "");
+      const taRef = useRef(null);
+      useEffect(() => { setTimeout(() => taRef.current && taRef.current.focus(), 50); }, []);
+      return (
+        <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "white", borderRadius: "20px 20px 0 0", padding: "20px 20px 36px", width: "100%", maxWidth: 520, boxShadow: "0 -8px 40px rgba(0,0,0,0.15)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+              <span style={{ fontSize: 20 }}>{task.icon}</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: "#1a1a2e" }}>{task.label}</span>
+              <button onClick={onClose} style={{ marginLeft: "auto", background: "#f5f5f5", border: "none", borderRadius: 8, padding: "4px 10px", cursor: "pointer", color: "#888" }}>✕</button>
+            </div>
+            <textarea ref={taRef} value={note} onChange={e => setNote(e.target.value)}
+              placeholder="備注（選填，留空直接送出）…" rows={3}
+              style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: "1.5px solid #e0e0e0", fontSize: 14, resize: "none", fontFamily: "'Noto Sans TC', sans-serif", outline: "none", lineHeight: 1.6 }}
+            />
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button onClick={() => onSubmit(note)} style={{ flex: 1, padding: "11px 0", background: "#1a1a2e", color: "white", border: "none", borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>✓ 完成勾選</button>
+              {existingNote !== undefined && existingNote !== null && (
+                <button onClick={() => onSubmit(note, true)} style={{ padding: "11px 16px", background: "#f5f5f5", color: "#555", border: "none", borderRadius: 10, fontWeight: 600, fontSize: 14, cursor: "pointer" }}>僅更新備注</button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function TaskItem({ task, checked, note, onCheck, onNoteClick }) {
+      return (
+        <div style={{ borderRadius: 12, overflow: "hidden", border: `1.5px solid ${checked ? "#4caf7d" : "#e8e8e8"}`, background: checked ? "#eef7ee" : "#fafafa", transition: "all 0.18s" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px" }}>
+            <div onClick={() => onCheck(task.id)} style={{ width: 23, height: 23, borderRadius: 6, flexShrink: 0, cursor: "pointer", border: `2px solid ${checked ? "#4caf7d" : "#ccc"}`, background: checked ? "#4caf7d" : "white", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}>
+              {checked && <span style={{ color: "white", fontSize: 13, fontWeight: 700 }}>✓</span>}
+            </div>
+            <span style={{ fontSize: 18 }}>{task.icon}</span>
+            <span onClick={() => onCheck(task.id)} style={{ flex: 1, fontSize: 14, fontWeight: 500, cursor: "pointer", color: checked ? "#333" : "#666", textDecoration: checked ? "line-through" : "none" }}>{task.label}</span>
+            <button onClick={() => onNoteClick(task)} style={{ background: note ? "#fff3e0" : "#f5f5f5", border: `1px solid ${note ? "#f5a623" : "#e0e0e0"}`, borderRadius: 7, padding: "3px 8px", cursor: "pointer", fontSize: 12, color: note ? "#f5a623" : "#bbb", fontWeight: 600 }}>{note ? "📝 備注" : "＋備注"}</button>
+          </div>
+          {note && (
+            <div onClick={() => onNoteClick(task)} style={{ padding: "5px 14px 10px 47px", fontSize: 12, color: "#888", cursor: "pointer", lineHeight: 1.5, borderTop: "1px solid #e8f5e9" }}>{note}</div>
+          )}
+        </div>
+      );
+    }
+
+    function App() {
+      const tasks = INITIAL_TASKS;
+      const [allChecked, setAllChecked] = useState(() => loadLS("allChecked", {}));
+      const [allNotes, setAllNotes]     = useState(() => loadLS("allNotes", {}));
+      const [todayKey]                  = useState(getTodayKey);
+      const [noteTarget, setNoteTarget] = useState(null);
+
+      useEffect(() => { saveLS("allChecked", allChecked); }, [allChecked]);
+      useEffect(() => { saveLS("allNotes",   allNotes);   }, [allNotes]);
+
+      const todayChecked = allChecked[todayKey] || {};
+      const todayNotes   = allNotes[todayKey]   || {};
+      const total  = tasks.length;
+      const done   = Object.values(todayChecked).filter(Boolean).length;
+      const pct    = total > 0 ? Math.round((done / total) * 100) : 0;
+      const pctColor = pct >= 80 ? "#27ae60" : pct >= 50 ? "#f39c12" : pct > 0 ? "#e74c3c" : "#ddd";
+
+      const handleCheck = useCallback((id) => {
+        const task = tasks.find(t => t.id === id);
+        if (!task) return;
+        if (!todayChecked[id]) {
+          setNoteTarget(task);
+        } else {
+          setAllChecked(prev => ({ ...prev, [todayKey]: { ...(prev[todayKey] || {}), [id]: false } }));
+          syncRow(todayKey, task.label, false, todayNotes[id] || "");
+        }
+      }, [tasks, todayChecked, todayNotes, todayKey]);
+
+      const handleNoteSubmit = useCallback((note, noteOnly = false) => {
+        const task = noteTarget;
+        if (!task) return;
+        const id = task.id;
+        setAllNotes(prev => ({ ...prev, [todayKey]: { ...(prev[todayKey] || {}), [id]: note } }));
+        if (!noteOnly) {
+          setAllChecked(prev => ({ ...prev, [todayKey]: { ...(prev[todayKey] || {}), [id]: true } }));
+          syncRow(todayKey, task.label, true, note);
+        } else {
+          syncRow(todayKey, task.label, !!todayChecked[id], note);
+        }
+        setNoteTarget(null);
+      }, [noteTarget, todayKey, todayChecked]);
+
+      return (
+        <div style={{ minHeight: "100vh", paddingBottom: 60 }}>
+          <div style={{ background: "rgba(255,255,255,0.93)", backdropFilter: "blur(12px)", padding: "20px 24px 14px", borderBottom: "1px solid #f0f0f0", position: "sticky", top: 0, zIndex: 10, boxShadow: "0 2px 16px rgba(0,0,0,0.05)" }}>
+            <div style={{ maxWidth: 520, margin: "0 auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#1a1a2e", letterSpacing: -0.5 }}>每日例行事項</h1>
+                  <p style={{ margin: "2px 0 0", fontSize: 12, color: "#999" }}>{formatDate(todayKey)}</p>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 28, fontWeight: 900, color: pctColor, lineHeight: 1 }}>{pct}%</div>
+                  <div style={{ fontSize: 11, color: "#bbb", marginTop: 2 }}>{done}/{total} 完成</div>
+                </div>
+              </div>
+              <div style={{ marginTop: 12, height: 5, background: "#f0f0f0", borderRadius: 3, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${pct}%`, background: pctColor, borderRadius: 3, transition: "width 0.4s ease" }} />
+              </div>
+            </div>
+          </div>
+
+          <div style={{ maxWidth: 520, margin: "0 auto", padding: "22px 16px 0" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+              {tasks.map(t => (
+                <TaskItem key={t.id} task={t}
+                  checked={!!todayChecked[t.id]}
+                  note={todayNotes[t.id] || ""}
+                  onCheck={handleCheck}
+                  onNoteClick={(task) => setNoteTarget(task)}
+                />
+              ))}
+            </div>
+          </div>
+
+          {noteTarget && (
+            <NotePopup task={noteTarget} existingNote={todayNotes[noteTarget.id]}
+              onSubmit={handleNoteSubmit} onClose={() => setNoteTarget(null)} />
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
