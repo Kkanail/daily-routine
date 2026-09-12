@@ -1,5 +1,5 @@
 import { readTable, writeRow, appendRow } from './sheets.js';
-import { uploadPhoto } from './drive.js';
+import { putPhoto, getPhoto } from './r2.js';
 import {
   businessDateParts, dayKey, periodKeyFor, currentTimeHHMM,
   monthKey, quarterKey, rangeForMonthKey, rangeForQuarterKey,
@@ -144,12 +144,21 @@ async function handleUpload(env, request) {
   const file = form.get('file');
   if (!file || typeof file === 'string') return json(env, { error: 'file is required' }, 400);
   const arrayBuffer = await file.arrayBuffer();
-  const photo_url = await uploadPhoto(env, {
-    fileName: file.name || `cat-${Date.now()}.jpg`,
-    mimeType: file.type || 'image/jpeg',
-    arrayBuffer,
-  });
+  const key = await putPhoto(env, { mimeType: file.type || 'image/jpeg', arrayBuffer });
+  const photo_url = `${new URL(request.url).origin}/photos/${key}`;
   return json(env, { photo_url });
+}
+
+async function handleGetPhoto(env, key) {
+  const obj = await getPhoto(env, key);
+  if (!obj) return new Response('not found', { status: 404, headers: corsHeaders(env) });
+  return new Response(obj.body, {
+    headers: {
+      'Content-Type': obj.httpMetadata?.contentType || 'application/octet-stream',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      ...corsHeaders(env),
+    },
+  });
 }
 
 // daily-multi 型態的完成率簡化為「當天只要有任一時段勾選就算完成一次」。
@@ -207,6 +216,7 @@ export default {
       if (url.pathname === '/api/catlog' && request.method === 'POST') return await handlePostCatlog(env, request);
       if (url.pathname === '/api/upload' && request.method === 'POST') return await handleUpload(env, request);
       if (url.pathname === '/api/report' && request.method === 'GET') return await handleReport(env, url);
+      if (url.pathname.startsWith('/photos/') && request.method === 'GET') return await handleGetPhoto(env, url.pathname.slice('/photos/'.length));
       return json(env, { error: 'not found' }, 404);
     } catch (err) {
       return json(env, { error: String((err && err.message) || err) }, 500);
