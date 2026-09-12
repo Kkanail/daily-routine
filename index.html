@@ -18,69 +18,71 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: linear-gradient(160deg, #f8f6ff 0%, #eaf4fd 55%, #fff9e6 100%); min-height: 100vh; font-family: 'Noto Sans TC', sans-serif; }
+    input, textarea, select, button { font-family: inherit; }
   </style>
 </head>
 <body>
   <div id="root"></div>
   <script type="text/babel">
-    const { useState, useCallback, useRef, useEffect } = React;
+    const { useState, useCallback, useRef, useEffect, useMemo } = React;
 
-    // ── 設定區 ── 只有這裡有敏感資訊 ────────────────────────────────────────
-    const FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSekRQmm1xtrei2I7SHmP9aEN_b-tjPPLpePa4uWNdvVZ7MqdQ/formResponse";
-    const ENTRY = {
-      date:  "entry.1833681731",
-      label: "entry.2004924142",
-      done:  "entry.413507961",
-      note:  "entry.1751193673",
-    };
-    // ────────────────────────────────────────────────────────────────────────
+    const WORKER_URL = "https://daily-routine-worker.kailanxh.workers.dev";
 
-    const INITIAL_TASKS = [
-      { id: "1",  label: "吃異位寧",          icon: "💊" },
-      { id: "2a", label: "胖貓早藥",          icon: "🐱" },
-      { id: "3",  label: "吃益生菌",          icon: "🌿" },
-      { id: "4",  label: "紅外線復健 🦶",     icon: "🔴" },
-      { id: "5",  label: "美容儀",            icon: "✨" },
-      { id: "6",  label: "澆花",              icon: "🌸" },
-      { id: "7",  label: "讀書 / 練習英文",   icon: "📚" },
-      { id: "8",  label: "復健小插畫",        icon: "🎨" },
-      { id: "9",  label: "閉氣練習",          icon: "🫁" },
-      { id: "10", label: "做作品集 / AI課程", icon: "💻" },
-      { id: "11", label: "瑜伽",              icon: "🧘" },
-      { id: "2b", label: "胖貓晚藥",          icon: "🐱" },
-      { id: "12", label: "日摘記錄",          icon: "✍️" },
+    // ── 週期邊界計算：跟 Worker 的 src/period.js 邏輯一致，全部從凌晨 5 點起算 ──
+    function taipeiParts(date) {
+      const fmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Taipei', hourCycle: 'h23',
+        year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+      });
+      const p = Object.fromEntries(fmt.formatToParts(date).map(x => [x.type, x.value]));
+      return { year: Number(p.year), month: Number(p.month), day: Number(p.day), hour: Number(p.hour), minute: Number(p.minute) };
+    }
+    function pad2(n) { return String(n).padStart(2, '0'); }
+    function businessDateParts(date = new Date()) {
+      const p = taipeiParts(date);
+      const d = new Date(Date.UTC(p.year, p.month - 1, p.day));
+      if (p.hour < 5) d.setUTCDate(d.getUTCDate() - 1);
+      return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+    }
+    function dayKey(bp) { return `${bp.year}-${pad2(bp.month)}-${pad2(bp.day)}`; }
+    function isoWeekKey(bp) {
+      const d = new Date(Date.UTC(bp.year, bp.month - 1, bp.day));
+      const dayNum = (d.getUTCDay() + 6) % 7;
+      d.setUTCDate(d.getUTCDate() - dayNum + 3);
+      const isoYear = d.getUTCFullYear();
+      const jan4 = new Date(Date.UTC(isoYear, 0, 4));
+      const jan4DayNum = (jan4.getUTCDay() + 6) % 7;
+      const week1Monday = new Date(jan4);
+      week1Monday.setUTCDate(jan4.getUTCDate() - jan4DayNum);
+      const weekNum = Math.round((d - week1Monday) / (7 * 86400000)) + 1;
+      return `${isoYear}-W${pad2(weekNum)}`;
+    }
+    function monthKey(bp) { return `${bp.year}-${pad2(bp.month)}`; }
+    function quarterKey(bp) { return `${bp.year}-Q${Math.floor((bp.month - 1) / 3) + 1}`; }
+    function quarterStartStr(bp) {
+      const startMonth = Math.floor((bp.month - 1) / 3) * 3 + 1;
+      return `${bp.year}-${pad2(startMonth)}-01`;
+    }
+    function periodKeyForFrequency(freq, ctx) {
+      if (freq === 'weekly') return ctx.weekKey;
+      if (freq === 'monthly') return ctx.monthKeyStr;
+      if (freq === 'quarterly') return ctx.quarterKeyStr;
+      return ctx.todayKey; // daily / daily-multi
+    }
+    function formatDate(bp) {
+      return new Date(Date.UTC(bp.year, bp.month - 1, bp.day)).toLocaleDateString("zh-TW", { timeZone: "UTC", month: "long", day: "numeric", weekday: "long" });
+    }
+
+    const BLOCK_DEFS = [
+      { key: 'daily', title: '今日待辦', freqs: ['daily', 'daily-multi'] },
+      { key: 'weekly', title: '本週待辦', freqs: ['weekly'] },
+      { key: 'monthly', title: '本月待辦', freqs: ['monthly'] },
+      { key: 'quarterly', title: '本季待辦', freqs: ['quarterly'] },
     ];
 
-    function getTodayKey() {
-      const now = new Date();
-      if (now.getHours() < 5) now.setDate(now.getDate() - 1);
-      const y = now.getFullYear();
-      const m = String(now.getMonth() + 1).padStart(2, '0');
-      const d = String(now.getDate()).padStart(2, '0');
-      return `${y}-${m}-${d}`;
-    }
-    function formatDate(s) {
-      return new Date(s + "T00:00:00").toLocaleDateString("zh-TW", { month: "long", day: "numeric", weekday: "long" });
-    }
-    function loadLS(key, fallback) {
-      try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
-    }
-    function saveLS(key, value) {
-      try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
-    }
+    function logKey(habitId, periodKey, slot) { return `${habitId}|${periodKey}|${slot || ''}`; }
 
-    function syncRow(date, label, done, note) {
-      const params = new URLSearchParams({
-        [ENTRY.date]:  date,
-        [ENTRY.label]: label,
-        [ENTRY.done]:  String(done),
-        [ENTRY.note]:  note || "",
-      });
-      const img = new Image();
-      img.src = `${FORM_URL}?${params}`;
-    }
-
-    function NotePopup({ task, existingNote, onSubmit, onClose }) {
+    function NotePopup({ label, icon, existingNote, onSubmit, onClose }) {
       const [note, setNote] = useState(existingNote || "");
       const taRef = useRef(null);
       useEffect(() => { setTimeout(() => taRef.current && taRef.current.focus(), 50); }, []);
@@ -88,84 +90,390 @@
         <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
           <div onClick={e => e.stopPropagation()} style={{ background: "white", borderRadius: "20px 20px 0 0", padding: "20px 20px 36px", width: "100%", maxWidth: 520, boxShadow: "0 -8px 40px rgba(0,0,0,0.15)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-              <span style={{ fontSize: 20 }}>{task.icon}</span>
-              <span style={{ fontSize: 15, fontWeight: 700, color: "#1a1a2e" }}>{task.label}</span>
+              <span style={{ fontSize: 20 }}>{icon}</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: "#1a1a2e" }}>{label}</span>
               <button onClick={onClose} style={{ marginLeft: "auto", background: "#f5f5f5", border: "none", borderRadius: 8, padding: "4px 10px", cursor: "pointer", color: "#888" }}>✕</button>
             </div>
             <textarea ref={taRef} value={note} onChange={e => setNote(e.target.value)}
               placeholder="備注（選填，留空直接送出）…" rows={3}
               style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: "1.5px solid #e0e0e0", fontSize: 14, resize: "none", fontFamily: "'Noto Sans TC', sans-serif", outline: "none", lineHeight: 1.6 }}
             />
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button onClick={() => onSubmit(note)} style={{ flex: 1, padding: "11px 0", background: "#1a1a2e", color: "white", border: "none", borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>✓ 完成勾選</button>
-              {existingNote !== undefined && existingNote !== null && (
-                <button onClick={() => onSubmit(note, true)} style={{ padding: "11px 16px", background: "#f5f5f5", color: "#555", border: "none", borderRadius: 10, fontWeight: 600, fontSize: 14, cursor: "pointer" }}>僅更新備注</button>
-              )}
-            </div>
+            <button onClick={() => onSubmit(note)} style={{ width: "100%", marginTop: 12, padding: "11px 0", background: "#1a1a2e", color: "white", border: "none", borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>✓ 完成勾選</button>
           </div>
         </div>
       );
     }
 
-    function TaskItem({ task, checked, note, onCheck, onNoteClick }) {
+    function HabitRow({ icon, label, checked, note, pending, failed, onCheck, onNoteClick }) {
       return (
         <div style={{ borderRadius: 12, overflow: "hidden", border: `1.5px solid ${checked ? "#4caf7d" : "#e8e8e8"}`, background: checked ? "#eef7ee" : "#fafafa", transition: "all 0.18s" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px" }}>
-            <div onClick={() => onCheck(task.id)} style={{ width: 23, height: 23, borderRadius: 6, flexShrink: 0, cursor: "pointer", border: `2px solid ${checked ? "#4caf7d" : "#ccc"}`, background: checked ? "#4caf7d" : "white", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}>
+            <div onClick={onCheck} style={{ width: 23, height: 23, borderRadius: 6, flexShrink: 0, cursor: "pointer", border: `2px solid ${checked ? "#4caf7d" : "#ccc"}`, background: checked ? "#4caf7d" : "white", display: "flex", alignItems: "center", justifyContent: "center" }}>
               {checked && <span style={{ color: "white", fontSize: 13, fontWeight: 700 }}>✓</span>}
             </div>
-            <span style={{ fontSize: 18 }}>{task.icon}</span>
-            <span onClick={() => onCheck(task.id)} style={{ flex: 1, fontSize: 14, fontWeight: 500, cursor: "pointer", color: checked ? "#333" : "#666", textDecoration: checked ? "line-through" : "none" }}>{task.label}</span>
-            <button onClick={() => onNoteClick(task)} style={{ background: note ? "#fff3e0" : "#f5f5f5", border: `1px solid ${note ? "#f5a623" : "#e0e0e0"}`, borderRadius: 7, padding: "3px 8px", cursor: "pointer", fontSize: 12, color: note ? "#f5a623" : "#bbb", fontWeight: 600 }}>{note ? "📝 備注" : "＋備注"}</button>
+            <span style={{ fontSize: 18 }}>{icon}</span>
+            <span onClick={onCheck} style={{ flex: 1, fontSize: 14, fontWeight: 500, cursor: "pointer", color: checked ? "#333" : "#666", textDecoration: checked ? "line-through" : "none" }}>{label}</span>
+            {pending && <span style={{ fontSize: 13 }}>⏳</span>}
+            {failed && <span title="同步失敗" style={{ fontSize: 13 }}>⚠️</span>}
+            <button onClick={onNoteClick} style={{ background: note ? "#fff3e0" : "#f5f5f5", border: `1px solid ${note ? "#f5a623" : "#e0e0e0"}`, borderRadius: 7, padding: "3px 8px", cursor: "pointer", fontSize: 12, color: note ? "#f5a623" : "#bbb", fontWeight: 600 }}>{note ? "📝 備注" : "＋備注"}</button>
           </div>
-          {note && (
-            <div onClick={() => onNoteClick(task)} style={{ padding: "5px 14px 10px 47px", fontSize: 12, color: "#888", cursor: "pointer", lineHeight: 1.5, borderTop: "1px solid #e8f5e9" }}>{note}</div>
+          {note && <div onClick={onNoteClick} style={{ padding: "5px 14px 10px 47px", fontSize: 12, color: "#888", cursor: "pointer", lineHeight: 1.5, borderTop: "1px solid #e8f5e9" }}>{note}</div>}
+        </div>
+      );
+    }
+
+    function AddAdhocRow({ onAdd }) {
+      const [open, setOpen] = useState(false);
+      const [name, setName] = useState("");
+      if (!open) {
+        return <button onClick={() => setOpen(true)} style={{ width: "100%", padding: "10px 0", background: "transparent", border: "1.5px dashed #ccc", borderRadius: 12, color: "#999", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>＋ 今天做了這件事</button>;
+      }
+      return (
+        <div style={{ display: "flex", gap: 8 }}>
+          <input autoFocus value={name} onChange={e => setName(e.target.value)}
+            placeholder="輸入事項名稱…"
+            onKeyDown={e => { if (e.key === 'Enter' && name.trim()) { onAdd(name.trim()); setName(""); setOpen(false); } }}
+            style={{ flex: 1, padding: "10px 13px", borderRadius: 10, border: "1.5px solid #ccc", fontSize: 14, outline: "none" }} />
+          <button onClick={() => { if (name.trim()) { onAdd(name.trim()); setName(""); setOpen(false); } }}
+            style={{ padding: "0 16px", background: "#1a1a2e", color: "white", border: "none", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>加入</button>
+        </div>
+      );
+    }
+
+    function ChecklistTab({ habits, logsByKey, ctx, onToggle, onEditNote, onAddAdhoc, pendingKeys, failedKeys }) {
+      const hasLogThisPeriod = (habit) => {
+        const pk = periodKeyForFrequency(habit.frequency_type, ctx);
+        for (const k of logsByKey.keys()) { if (k.startsWith(habit.habit_id + '|' + pk + '|')) return true; }
+        return false;
+      };
+
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+          {BLOCK_DEFS.map(block => {
+            const items = habits.filter(h => block.freqs.includes(h.frequency_type) && (h.pinned || hasLogThisPeriod(h)));
+            return (
+              <div key={block.key}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#999", marginBottom: 8, letterSpacing: 0.5 }}>{block.title}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                  {items.length === 0 && <div style={{ fontSize: 13, color: "#ccc", padding: "6px 2px" }}>目前沒有項目</div>}
+                  {items.map(h => {
+                    const periodKey = periodKeyForFrequency(h.frequency_type, ctx);
+                    if (h.frequency_type === 'daily-multi' && h.frequency_detail.length > 0) {
+                      return (
+                        <div key={h.habit_id} style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                          <div style={{ fontSize: 13, color: "#888", display: "flex", alignItems: "center", gap: 6 }}><span>{h.emoji}</span>{h.habit_name}</div>
+                          {h.frequency_detail.map(slot => {
+                            const k = logKey(h.habit_id, periodKey, slot);
+                            const row = logsByKey.get(k);
+                            return (
+                              <HabitRow key={slot} icon="•" label={slot}
+                                checked={!!(row && row.done)} note={row && row.note}
+                                pending={pendingKeys.has(h.habit_id + '|' + slot)} failed={failedKeys.has(h.habit_id + '|' + slot)}
+                                onCheck={() => onToggle(h, slot)} onNoteClick={() => onEditNote(h, slot)} />
+                            );
+                          })}
+                        </div>
+                      );
+                    }
+                    const k = logKey(h.habit_id, periodKey, '');
+                    const row = logsByKey.get(k);
+                    return (
+                      <HabitRow key={h.habit_id} icon={h.emoji} label={h.habit_name}
+                        checked={!!(row && row.done)} note={row && row.note}
+                        pending={pendingKeys.has(h.habit_id + '|')} failed={failedKeys.has(h.habit_id + '|')}
+                        onCheck={() => onToggle(h, '')} onNoteClick={() => onEditNote(h, '')} />
+                    );
+                  })}
+                  {block.key === 'daily' && <AddAdhocRow onAdd={onAddAdhoc} />}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    const CAT_CATEGORIES = ["吐", "餵食-乾乾", "餵食-罐罐", "特殊補給", "其他"];
+
+    function CatTab({ ctx }) {
+      const [entries, setEntries] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [category, setCategory] = useState(CAT_CATEGORIES[0]);
+      const [description, setDescription] = useState("");
+      const [file, setFile] = useState(null);
+      const [preview, setPreview] = useState(null);
+      const [submitting, setSubmitting] = useState(false);
+
+      const loadEntries = useCallback(async () => {
+        setLoading(true);
+        try {
+          const res = await fetch(`${WORKER_URL}/api/catlog?month=${ctx.monthKeyStr}`);
+          const data = await res.json();
+          setEntries((data.entries || []).slice().reverse());
+        } catch (e) { /* 靜默失敗，畫面保留現有清單 */ }
+        setLoading(false);
+      }, [ctx.monthKeyStr]);
+
+      useEffect(() => { loadEntries(); }, [loadEntries]);
+
+      const handleFile = (e) => {
+        const f = e.target.files[0];
+        setFile(f || null);
+        setPreview(f ? URL.createObjectURL(f) : null);
+      };
+
+      const submit = async () => {
+        setSubmitting(true);
+        try {
+          let photo_url = "";
+          if (file) {
+            const fd = new FormData();
+            fd.append('file', file);
+            const upRes = await fetch(`${WORKER_URL}/api/upload`, { method: 'POST', body: fd });
+            const upData = await upRes.json();
+            photo_url = upData.photo_url || "";
+          }
+          await fetch(`${WORKER_URL}/api/catlog`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category, description, photo_url }),
+          });
+          setDescription(""); setFile(null); setPreview(null);
+          await loadEntries();
+        } catch (e) { alert('送出失敗，稍後再試一次'); }
+        setSubmitting(false);
+      };
+
+      return (
+        <div>
+          <div style={{ background: "white", borderRadius: 16, padding: 16, border: "1.5px solid #eee", marginBottom: 18 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#999", marginBottom: 10 }}>新增一筆記錄</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+              {CAT_CATEGORIES.map(c => (
+                <button key={c} onClick={() => setCategory(c)}
+                  style={{ padding: "7px 12px", borderRadius: 20, border: category === c ? "1.5px solid #1a1a2e" : "1.5px solid #e0e0e0", background: category === c ? "#1a1a2e" : "white", color: category === c ? "white" : "#666", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{c}</button>
+              ))}
+            </div>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2}
+              placeholder="嘔吐物狀況 / 餵食份量…"
+              style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: "1.5px solid #e0e0e0", fontSize: 14, resize: "none", outline: "none", marginBottom: 10 }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+              <label style={{ fontSize: 13, color: "#888", cursor: "pointer", padding: "7px 12px", border: "1.5px dashed #ccc", borderRadius: 10 }}>
+                📷 選擇照片（選填）
+                <input type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
+              </label>
+              {preview && <img src={preview} style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8 }} />}
+            </div>
+            <button onClick={submit} disabled={submitting}
+              style={{ width: "100%", padding: "11px 0", background: "#1a1a2e", color: "white", border: "none", borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: submitting ? "default" : "pointer", opacity: submitting ? 0.6 : 1 }}>
+              {submitting ? "送出中…" : "送出"}
+            </button>
+          </div>
+
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#999", marginBottom: 8 }}>本月記錄</div>
+          {loading && <div style={{ fontSize: 13, color: "#ccc" }}>載入中…</div>}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {entries.map((e, i) => (
+              <div key={i} style={{ background: "white", borderRadius: 12, padding: "10px 14px", border: "1.5px solid #eee", display: "flex", gap: 10 }}>
+                {e.photo_url && <img src={e.photo_url} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8, flexShrink: 0 }} />}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, color: "#aaa" }}>{e.date} {e.time}　<span style={{ color: "#f5a623", fontWeight: 700 }}>{e.category}</span></div>
+                  {e.description && <div style={{ fontSize: 13, color: "#555", marginTop: 3 }}>{e.description}</div>}
+                </div>
+              </div>
+            ))}
+            {!loading && entries.length === 0 && <div style={{ fontSize: 13, color: "#ccc" }}>這個月還沒有記錄</div>}
+          </div>
+        </div>
+      );
+    }
+
+    function rateColor(rate) {
+      if (rate >= 0.8) return "#27ae60";
+      if (rate >= 0.5) return "#f39c12";
+      if (rate > 0) return "#e74c3c";
+      return "#ddd";
+    }
+
+    function ReportTab({ ctx }) {
+      const [range, setRange] = useState('month');
+      const [scope, setScope] = useState('habit');
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      useEffect(() => {
+        let cancelled = false;
+        setLoading(true);
+        fetch(`${WORKER_URL}/api/report?scope=${scope}&range=${range}`)
+          .then(r => r.json())
+          .then(d => { if (!cancelled) { setData(d); setLoading(false); } })
+          .catch(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+      }, [range, scope]);
+
+      return (
+        <div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            {[['month', '本月'], ['quarter', '本季']].map(([v, l]) => (
+              <button key={v} onClick={() => setRange(v)} style={{ flex: 1, padding: "9px 0", borderRadius: 10, border: range === v ? "1.5px solid #1a1a2e" : "1.5px solid #e0e0e0", background: range === v ? "#1a1a2e" : "white", color: range === v ? "white" : "#666", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{l}</button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            {[['habit', '依 Habit'], ['project', '依 Project']].map(([v, l]) => (
+              <button key={v} onClick={() => setScope(v)} style={{ flex: 1, padding: "9px 0", borderRadius: 10, border: scope === v ? "1.5px solid #1a1a2e" : "1.5px solid #e0e0e0", background: scope === v ? "#1a1a2e" : "white", color: scope === v ? "white" : "#666", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{l}</button>
+            ))}
+          </div>
+          {loading && <div style={{ fontSize: 13, color: "#ccc" }}>載入中…</div>}
+          {!loading && data && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {data.result.length === 0 && <div style={{ fontSize: 13, color: "#ccc" }}>目前沒有資料</div>}
+              {data.result.map((r, i) => {
+                const rate = r.rate || 0;
+                const name = scope === 'habit' ? `${r.emoji || ''} ${r.habit_name}` : r.project_name;
+                const sub = scope === 'habit' ? `${r.completed}/${Math.round(r.expected * 10) / 10}` : `${r.habit_count} 個習慣`;
+                return (
+                  <div key={i} style={{ background: "white", borderRadius: 12, padding: "10px 14px", border: "1.5px solid #eee" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 6 }}>
+                      <span style={{ fontWeight: 600, color: "#333" }}>{name}</span>
+                      <span style={{ color: rateColor(rate), fontWeight: 700 }}>{Math.round(rate * 100)}%</span>
+                    </div>
+                    <div style={{ height: 5, background: "#f0f0f0", borderRadius: 3, overflow: "hidden", marginBottom: 4 }}>
+                      <div style={{ height: "100%", width: `${Math.round(rate * 100)}%`, background: rateColor(rate) }} />
+                    </div>
+                    <div style={{ fontSize: 11, color: "#aaa" }}>{sub}</div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       );
     }
 
     function App() {
-      const tasks = INITIAL_TASKS;
-      const [allChecked, setAllChecked] = useState(() => loadLS("allChecked", {}));
-      const [allNotes, setAllNotes]     = useState(() => loadLS("allNotes", {}));
-      const [todayKey]                  = useState(getTodayKey);
-      const [noteTarget, setNoteTarget] = useState(null);
+      const [tab, setTab] = useState('checklist');
+      const [habits, setHabits] = useState([]);
+      const [logs, setLogs] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [loadError, setLoadError] = useState(false);
+      const [noteTarget, setNoteTarget] = useState(null); // { habit, slot }
+      const [pendingKeys, setPendingKeys] = useState(() => new Set());
+      const [failedKeys, setFailedKeys] = useState(() => new Set());
 
-      useEffect(() => { saveLS("allChecked", allChecked); }, [allChecked]);
-      useEffect(() => { saveLS("allNotes",   allNotes);   }, [allNotes]);
+      const ctx = useMemo(() => {
+        const bp = businessDateParts();
+        return { bp, todayKey: dayKey(bp), weekKey: isoWeekKey(bp), monthKeyStr: monthKey(bp), quarterKeyStr: quarterKey(bp), quarterStart: quarterStartStr(bp) };
+      }, []);
 
-      const todayChecked = allChecked[todayKey] || {};
-      const todayNotes   = allNotes[todayKey]   || {};
-      const total  = tasks.length;
-      const done   = Object.values(todayChecked).filter(Boolean).length;
-      const pct    = total > 0 ? Math.round((done / total) * 100) : 0;
+      const loadAll = useCallback(async () => {
+        setLoading(true);
+        setLoadError(false);
+        try {
+          const [bootRes, logRes] = await Promise.all([
+            fetch(`${WORKER_URL}/api/bootstrap`),
+            fetch(`${WORKER_URL}/api/log?from=${ctx.quarterStart}&to=${ctx.todayKey}`),
+          ]);
+          const boot = await bootRes.json();
+          const logData = await logRes.json();
+          setHabits(boot.habits || []);
+          setLogs(logData.logs || []);
+        } catch (e) {
+          setLoadError(true);
+        }
+        setLoading(false);
+      }, [ctx]);
+
+      useEffect(() => { loadAll(); }, [loadAll]);
+
+      const logsByKey = useMemo(() => {
+        const map = new Map();
+        for (const l of logs) map.set(logKey(l.habit_id, l.period_key, l.slot), l);
+        return map;
+      }, [logs]);
+
+      const postLog = useCallback(async (habit, slot, done, note) => {
+        const pendingKey = habit.habit_id + '|' + slot;
+        const periodKey = periodKeyForFrequency(habit.frequency_type, ctx);
+        setPendingKeys(prev => new Set(prev).add(pendingKey));
+        setFailedKeys(prev => { const s = new Set(prev); s.delete(pendingKey); return s; });
+        setLogs(prev => {
+          const idx = prev.findIndex(l => l.habit_id === habit.habit_id && l.period_key === periodKey && (l.slot || '') === slot);
+          const row = { date: ctx.todayKey, time: '', habit_id: habit.habit_id, slot, period_key: periodKey, done, note };
+          if (idx >= 0) { const copy = [...prev]; copy[idx] = row; return copy; }
+          return [...prev, row];
+        });
+        try {
+          const res = await fetch(`${WORKER_URL}/api/log`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ habit_id: habit.habit_id, slot, done, note }),
+          });
+          if (!res.ok) throw new Error('sync failed');
+        } catch (e) {
+          setFailedKeys(prev => new Set(prev).add(pendingKey));
+        } finally {
+          setPendingKeys(prev => { const s = new Set(prev); s.delete(pendingKey); return s; });
+        }
+      }, [ctx]);
+
+      const handleToggle = useCallback((habit, slot) => {
+        const periodKey = periodKeyForFrequency(habit.frequency_type, ctx);
+        const row = logsByKey.get(logKey(habit.habit_id, periodKey, slot));
+        if (row && row.done) {
+          postLog(habit, slot, false, row.note || '');
+        } else {
+          setNoteTarget({ habit, slot });
+        }
+      }, [ctx, logsByKey, postLog]);
+
+      const handleNoteClick = useCallback((habit, slot) => {
+        setNoteTarget({ habit, slot });
+      }, []);
+
+      const handleNoteSubmit = useCallback((note) => {
+        const { habit, slot } = noteTarget;
+        const periodKey = periodKeyForFrequency(habit.frequency_type, ctx);
+        const row = logsByKey.get(logKey(habit.habit_id, periodKey, slot));
+        postLog(habit, slot, true, note);
+        setNoteTarget(null);
+      }, [noteTarget, ctx, logsByKey, postLog]);
+
+      const handleAddAdhoc = useCallback(async (name) => {
+        try {
+          const res = await fetch(`${WORKER_URL}/api/habits`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ habit_name: name, emoji: '📌' }),
+          });
+          const data = await res.json();
+          const newHabit = { habit_id: data.habit_id, habit_name: name, emoji: '📌', project_ids: [], frequency_type: 'daily', frequency_detail: [], is_temporary: false, active: true, pinned: false };
+          setHabits(prev => [...prev, newHabit]);
+          await postLog(newHabit, '', true, '');
+        } catch (e) { alert('新增失敗，稍後再試一次'); }
+      }, [postLog]);
+
+      const todayDoneCount = useMemo(() => {
+        const dailyHabits = habits.filter(h => (h.frequency_type === 'daily' || h.frequency_type === 'daily-multi'));
+        let total = 0, done = 0;
+        for (const h of dailyHabits) {
+          if (h.frequency_type === 'daily-multi' && h.frequency_detail.length > 0) {
+            for (const slot of h.frequency_detail) {
+              if (!h.pinned && !logsByKey.has(logKey(h.habit_id, ctx.todayKey, slot))) continue;
+              total++;
+              const row = logsByKey.get(logKey(h.habit_id, ctx.todayKey, slot));
+              if (row && row.done) done++;
+            }
+          } else {
+            const row = logsByKey.get(logKey(h.habit_id, ctx.todayKey, ''));
+            if (!h.pinned && !row) continue;
+            total++;
+            if (row && row.done) done++;
+          }
+        }
+        return { total, done };
+      }, [habits, logsByKey, ctx]);
+
+      const pct = todayDoneCount.total > 0 ? Math.round((todayDoneCount.done / todayDoneCount.total) * 100) : 0;
       const pctColor = pct >= 80 ? "#27ae60" : pct >= 50 ? "#f39c12" : pct > 0 ? "#e74c3c" : "#ddd";
 
-      const handleCheck = useCallback((id) => {
-        const task = tasks.find(t => t.id === id);
-        if (!task) return;
-        if (!todayChecked[id]) {
-          setNoteTarget(task);
-        } else {
-          setAllChecked(prev => ({ ...prev, [todayKey]: { ...(prev[todayKey] || {}), [id]: false } }));
-          syncRow(todayKey, task.label, false, todayNotes[id] || "");
-        }
-      }, [tasks, todayChecked, todayNotes, todayKey]);
-
-      const handleNoteSubmit = useCallback((note, noteOnly = false) => {
-        const task = noteTarget;
-        if (!task) return;
-        const id = task.id;
-        setAllNotes(prev => ({ ...prev, [todayKey]: { ...(prev[todayKey] || {}), [id]: note } }));
-        if (!noteOnly) {
-          setAllChecked(prev => ({ ...prev, [todayKey]: { ...(prev[todayKey] || {}), [id]: true } }));
-          syncRow(todayKey, task.label, true, note);
-        } else {
-          syncRow(todayKey, task.label, !!todayChecked[id], note);
-        }
-        setNoteTarget(null);
-      }, [noteTarget, todayKey, todayChecked]);
+      const TABS = [['checklist', '打卡'], ['cat', '胖貓記錄'], ['report', '報表']];
 
       return (
         <div style={{ minHeight: "100vh", paddingBottom: 60 }}>
@@ -174,36 +482,45 @@
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div>
                   <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#1a1a2e", letterSpacing: -0.5 }}>每日例行事項</h1>
-                  <p style={{ margin: "2px 0 0", fontSize: 12, color: "#999" }}>{formatDate(todayKey)}</p>
+                  <p style={{ margin: "2px 0 0", fontSize: 12, color: "#999" }}>{formatDate(ctx.bp)}</p>
                 </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 28, fontWeight: 900, color: pctColor, lineHeight: 1 }}>{pct}%</div>
-                  <div style={{ fontSize: 11, color: "#bbb", marginTop: 2 }}>{done}/{total} 完成</div>
-                </div>
+                {tab === 'checklist' && (
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 28, fontWeight: 900, color: pctColor, lineHeight: 1 }}>{pct}%</div>
+                    <div style={{ fontSize: 11, color: "#bbb", marginTop: 2 }}>{todayDoneCount.done}/{todayDoneCount.total} 完成</div>
+                  </div>
+                )}
               </div>
-              <div style={{ marginTop: 12, height: 5, background: "#f0f0f0", borderRadius: 3, overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${pct}%`, background: pctColor, borderRadius: 3, transition: "width 0.4s ease" }} />
+              <div style={{ display: "flex", gap: 6, marginTop: 14 }}>
+                {TABS.map(([v, l]) => (
+                  <button key={v} onClick={() => setTab(v)}
+                    style={{ flex: 1, padding: "8px 0", borderRadius: 10, border: "none", background: tab === v ? "#1a1a2e" : "#f2f2f2", color: tab === v ? "white" : "#888", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{l}</button>
+                ))}
               </div>
             </div>
           </div>
 
           <div style={{ maxWidth: 520, margin: "0 auto", padding: "22px 16px 0" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-              {tasks.map(t => (
-                <TaskItem key={t.id} task={t}
-                  checked={!!todayChecked[t.id]}
-                  note={todayNotes[t.id] || ""}
-                  onCheck={handleCheck}
-                  onNoteClick={(task) => setNoteTarget(task)}
-                />
-              ))}
-            </div>
+            {loading && <div style={{ fontSize: 13, color: "#ccc", textAlign: "center", padding: "40px 0" }}>載入中…</div>}
+            {!loading && loadError && <div style={{ fontSize: 13, color: "#e74c3c", textAlign: "center", padding: "40px 0" }}>連線失敗，請檢查網路後重新整理</div>}
+            {!loading && !loadError && tab === 'checklist' && (
+              <ChecklistTab habits={habits} logsByKey={logsByKey} ctx={ctx}
+                onToggle={handleToggle} onEditNote={handleNoteClick} onAddAdhoc={handleAddAdhoc}
+                pendingKeys={pendingKeys} failedKeys={failedKeys} />
+            )}
+            {!loading && !loadError && tab === 'cat' && <CatTab ctx={ctx} />}
+            {!loading && !loadError && tab === 'report' && <ReportTab ctx={ctx} />}
           </div>
 
-          {noteTarget && (
-            <NotePopup task={noteTarget} existingNote={todayNotes[noteTarget.id]}
-              onSubmit={handleNoteSubmit} onClose={() => setNoteTarget(null)} />
-          )}
+          {noteTarget && (() => {
+            const periodKey = periodKeyForFrequency(noteTarget.habit.frequency_type, ctx);
+            const row = logsByKey.get(logKey(noteTarget.habit.habit_id, periodKey, noteTarget.slot));
+            return (
+              <NotePopup label={noteTarget.slot ? `${noteTarget.habit.habit_name} · ${noteTarget.slot}` : noteTarget.habit.habit_name}
+                icon={noteTarget.habit.emoji} existingNote={row && row.note}
+                onSubmit={handleNoteSubmit} onClose={() => setNoteTarget(null)} />
+            );
+          })()}
         </div>
       );
     }
