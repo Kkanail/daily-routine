@@ -58,12 +58,12 @@ async function writeRow(env, sheetName, rowNumber, headers, obj) {
   });
 }
 
+// 自己算下一個空白列，不用 values:append —— Sheets 的 append 會把「有格式/驗證規則」的列
+// 也當成資料範圍，結果新列被丟到很後面（曾經掉到第 1001 列）。
 async function appendRow(env, sheetName, headers, obj) {
-  const values = rowValuesFromHeaders(headers, obj);
-  return sheetsFetch(env, `/values/${encodeURIComponent(sheetName)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-    method: 'POST',
-    body: JSON.stringify({ values: [values] }),
-  });
+  const { rows } = await readTable(env, sheetName);
+  const nextRow = rows.length ? Math.max(...rows.map(r => r._row)) + 1 : 2;
+  return writeRow(env, sheetName, nextRow, headers, obj);
 }
 
 async function batchUpdate(env, requests) {

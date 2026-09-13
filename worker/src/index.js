@@ -79,8 +79,8 @@ async function handleBootstrap(env) {
   const [{ rows: projectRows }, { rows: habitRows }] = await Promise.all([
     readTable(env, 'Projects'), readTable(env, 'Habits'),
   ]);
-  const projects = projectRows.map(r => ({ project_id: r.project_id, project_name: r.project_name, note: r.note }));
-  const habits = habitRows.map(parseHabit).filter(h => h.active);
+  const projects = projectRows.filter(r => r.project_id).map(r => ({ project_id: r.project_id, project_name: r.project_name, note: r.note }));
+  const habits = habitRows.filter(r => r.habit_id).map(parseHabit).filter(h => h.active);
   return json(env, { projects, habits });
 }
 
@@ -234,7 +234,7 @@ async function handleReport(env, url) {
   const [{ rows: habitRows }, { rows: logRows }, { rows: projectRows }] = await Promise.all([
     readTable(env, 'Habits'), readTable(env, 'Daily Log'), readTable(env, 'Projects'),
   ]);
-  const habits = habitRows.map(parseHabit);
+  const habits = habitRows.filter(r => r.habit_id).map(parseHabit);
   const logs = logRows.map(parseLog).filter(l => l.done && l.date >= from && l.date <= to);
 
   // 暫時性項目（例如只吃一週的藥）的分母只算它跟報表區間重疊的那幾天，否則一週的藥會被當成整個月在算。
