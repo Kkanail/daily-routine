@@ -81,7 +81,13 @@ async function handleBootstrap(env) {
   ]);
   const projects = projectRows.filter(r => r.project_id).map(r => ({ project_id: r.project_id, project_name: r.project_name, note: r.note }));
   const habits = habitRows.filter(r => r.habit_id).map(parseHabit).filter(h => h.active);
-  return json(env, { projects, habits });
+  // Settings 分頁是可選的：被刪掉或改名時不要讓整個 app 載不起來。
+  let settings = {};
+  try {
+    const { rows } = await readTable(env, 'Settings');
+    settings = Object.fromEntries(rows.filter(r => r.key).map(r => [r.key, r.value]));
+  } catch (e) { /* 用前端預設值 */ }
+  return json(env, { projects, habits, settings });
 }
 
 async function handleGetLog(env, url) {

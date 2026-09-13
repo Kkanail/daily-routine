@@ -769,6 +769,9 @@
       const [tab, setTab] = useState('checklist');
       const [habits, setHabits] = useState([]);
       const [projects, setProjects] = useState([]);
+      // 名稱來自 Sheet 的 Settings 分頁；先用上次存下來的值，避免載入中閃一下舊名字。
+      const [appName, setAppName] = useState(() => { try { return localStorage.getItem('app_name') || '每日例行事項'; } catch (e) { return '每日例行事項'; } });
+      useEffect(() => { document.title = appName; }, [appName]);
       const [logs, setLogs] = useState([]);
       const [loading, setLoading] = useState(true);
       const [loadError, setLoadError] = useState(false);
@@ -809,6 +812,8 @@
           const logData = await logRes.json();
           setHabits(boot.habits || []);
           setProjects(boot.projects || []);
+          const name = boot.settings && boot.settings.app_name && boot.settings.app_name.trim();
+          if (name) { setAppName(name); try { localStorage.setItem('app_name', name); } catch (e) {} }
           setLogs(logData.logs || []);
         } catch (e) {
           setLoadError(true);
@@ -980,7 +985,7 @@
             <div style={{ maxWidth: 520, margin: "0 auto" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div>
-                  <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#1a1a2e", letterSpacing: -0.5 }}>每日例行事項</h1>
+                  <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#1a1a2e", letterSpacing: -0.5 }}>{appName}</h1>
                   <p style={{ margin: "2px 0 0", fontSize: 12, color: "#999" }}>{formatDate(ctx.bp)}</p>
                 </div>
                 {tab === 'checklist' && (
