@@ -159,20 +159,46 @@
       );
     }
 
-    function AddAdhocRow({ onAdd }) {
+    function ProjectChips({ projects, selected, onToggle }) {
+      if (!projects.length) return null;
+      return (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {projects.map(p => {
+            const on = selected.includes(p.project_id);
+            return (
+              <button key={p.project_id} onClick={() => onToggle(p.project_id)}
+                style={{ padding: "5px 11px", borderRadius: 20, border: on ? "1.5px solid #1a1a2e" : "1.5px solid #e0e0e0", background: on ? "#1a1a2e" : "white", color: on ? "white" : "#666", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                {p.project_name || p.project_id}
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // 點選順序 = 儲存順序；第一個選的 project 決定它在今日清單裡被分到哪一組。
+    function AddAdhocRow({ onAdd, projects }) {
       const [open, setOpen] = useState(false);
       const [name, setName] = useState("");
+      const [selected, setSelected] = useState([]);
+      const toggle = (id) => setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+      const submit = () => { if (name.trim()) { onAdd(name.trim(), selected); setName(""); setSelected([]); setOpen(false); } };
       if (!open) {
         return <button onClick={() => setOpen(true)} style={{ width: "100%", padding: "10px 0", background: "transparent", border: "1.5px dashed #ccc", borderRadius: 12, color: "#999", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>＋ 今天做了這件事</button>;
       }
       return (
-        <div style={{ display: "flex", gap: 8 }}>
-          <input autoFocus value={name} onChange={e => setName(e.target.value)}
-            placeholder="輸入事項名稱…"
-            onKeyDown={e => { if (e.key === 'Enter' && name.trim()) { onAdd(name.trim()); setName(""); setOpen(false); } }}
-            style={{ flex: 1, padding: "10px 13px", borderRadius: 10, border: "1.5px solid #ccc", fontSize: 14, outline: "none" }} />
-          <button onClick={() => { if (name.trim()) { onAdd(name.trim()); setName(""); setOpen(false); } }}
-            style={{ padding: "0 16px", background: "#1a1a2e", color: "white", border: "none", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>加入</button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input autoFocus value={name} onChange={e => setName(e.target.value)}
+              placeholder="輸入事項名稱…"
+              onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+              style={{ flex: 1, minWidth: 0, padding: "10px 13px", borderRadius: 10, border: "1.5px solid #ccc", fontSize: 14, outline: "none" }} />
+            <button onClick={submit}
+              style={{ padding: "0 16px", background: "#1a1a2e", color: "white", border: "none", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>加入</button>
+            <button onClick={() => { setOpen(false); setName(""); setSelected([]); }}
+              style={{ padding: "0 12px", background: "#f5f5f5", color: "#888", border: "none", borderRadius: 10, cursor: "pointer" }}>✕</button>
+          </div>
+          <ProjectChips projects={projects} selected={selected} onToggle={toggle} />
         </div>
       );
     }
@@ -286,7 +312,7 @@
                         </div>
                       ))
                     : items.map(renderItem)}
-                  {block.key === 'daily' && <AddAdhocRow onAdd={onAddAdhoc} />}
+                  {block.key === 'daily' && <AddAdhocRow onAdd={onAddAdhoc} projects={projects} />}
                   {block.key === 'daily' && <AddDatedRow onAdd={onAddDated} defaultDate={ctx.todayKey} projects={projects} />}
                 </div>
               </div>
@@ -641,14 +667,15 @@
         setNoteTarget(null);
       }, [noteTarget, ctx, logsByKey, postLog]);
 
-      const handleAddAdhoc = useCallback(async (name) => {
+      const handleAddAdhoc = useCallback(async (name, project_ids = []) => {
         try {
           const res = await fetch(`${WORKER_URL}/api/habits`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ habit_name: name, emoji: '📌' }),
+            body: JSON.stringify({ habit_name: name, emoji: '📌', project_ids }),
           });
           const data = await res.json();
-          const newHabit = { habit_id: data.habit_id, habit_name: name, emoji: '📌', project_ids: [], frequency_type: 'daily', frequency_detail: [], is_temporary: false, active: true, pinned: false };
+          if (!res.ok) throw new Error(data.error || 'failed');
+          const newHabit = { habit_id: data.habit_id, habit_name: name, emoji: '📌', project_ids, frequency_type: 'daily', frequency_detail: [], is_temporary: false, active: true, pinned: false };
           setHabits(prev => [...prev, newHabit]);
           await postLog(newHabit, '', true, '');
         } catch (e) { alert('新增失敗，稍後再試一次'); }
