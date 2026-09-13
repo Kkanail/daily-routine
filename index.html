@@ -427,7 +427,7 @@
       tail:    { row: 3, frames: [0, 1], frameDuration: 350 },
     };
     const PET_CELL = 128;
-    const PET_SCALE = 0.8;
+    const PET_SCALE = 1.25;
     const PET_RENDER = PET_CELL * PET_SCALE;
 
     // 依今日完成率換心情：0% 懶洋洋、中間正常、100% 精力充沛還會蹦
@@ -661,7 +661,7 @@
       const TABS = [['checklist', '打卡'], ['cat', '胖貓記錄'], ['report', '報表']];
 
       return (
-        <div style={{ minHeight: "100vh", paddingBottom: 140 }}>
+        <div style={{ minHeight: "100vh", paddingBottom: 200 }}>
           <Pet pct={pct} />
           <div style={{ background: "rgba(255,255,255,0.93)", backdropFilter: "blur(12px)", padding: "20px 24px 14px", borderBottom: "1px solid #f0f0f0", position: "sticky", top: 0, zIndex: 10, boxShadow: "0 2px 16px rgba(0,0,0,0.05)" }}>
             <div style={{ maxWidth: 520, margin: "0 auto" }}>
