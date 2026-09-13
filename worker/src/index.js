@@ -5,7 +5,7 @@ import {
   monthKey, quarterKey, rangeForMonthKey, rangeForQuarterKey,
 } from './period.js';
 
-const HABITS_HEADERS = ['habit_id', 'habit_name', 'emoji', 'project_ids', 'frequency_type', 'frequency_detail', 'is_temporary', 'start_date', 'end_date', 'active', 'pinned'];
+const HABITS_HEADERS = ['habit_id', 'habit_name', 'emoji', 'project_ids', 'frequency_type', 'frequency_detail', 'is_temporary', 'start_date', 'end_date', 'active', 'pinned', 'target_count'];
 const LOG_HEADERS = ['date', 'time', 'habit_id', 'slot', 'period_key', 'done', 'note'];
 const CATLOG_HEADERS = ['date', 'time', 'category', 'description', 'photo_url', 'source'];
 
@@ -63,6 +63,7 @@ function parseHabit(row) {
     end_date: row.end_date || '',
     active: String(row.active).toUpperCase() !== 'FALSE',
     pinned: String(row.pinned).toUpperCase() === 'TRUE',
+    target_count: Number(row.target_count) > 1 ? Number(row.target_count) : 1,
   };
 }
 
@@ -123,7 +124,7 @@ async function handlePostLog(env, request) {
 
 async function handlePostHabit(env, request) {
   const body = await request.json();
-  const { habit_name, emoji = '📌', project_ids = [], is_temporary = false, start_date = '', end_date = '', frequency_detail = [] } = body;
+  const { habit_name, emoji = '📌', project_ids = [], is_temporary = false, start_date = '', end_date = '', frequency_detail = [], target_count = '' } = body;
   if (!habit_name) return json(env, { error: 'habit_name is required' }, 400);
   if (is_temporary && (!start_date || !end_date)) return json(env, { error: 'temporary habits need start_date and end_date' }, 400);
   const slots = (Array.isArray(frequency_detail) ? frequency_detail : String(frequency_detail || '').split(',')).map(s => s.trim()).filter(Boolean);
@@ -137,6 +138,7 @@ async function handlePostHabit(env, request) {
     frequency_type: slots.length ? 'daily-multi' : 'daily', frequency_detail: slots.join(','),
     is_temporary: !!is_temporary, start_date, end_date,
     active: true, pinned: false,
+    target_count: Number(target_count) > 1 ? Number(target_count) : '',
   };
   await appendRow(env, 'Habits', headersFinal, rowObj);
   return json(env, { habit_id });
@@ -201,7 +203,6 @@ async function handleGetPhoto(env, key) {
   });
 }
 
-// daily-multi 型態的完成率簡化為「當天只要有任一時段勾選就算完成一次」。
 async function handleReport(env, url) {
   const scope = url.searchParams.get('scope') === 'project' ? 'project' : 'habit';
   const range = url.searchParams.get('range') === 'quarter' ? 'quarter' : 'month';
@@ -215,16 +216,27 @@ async function handleReport(env, url) {
   const habits = habitRows.map(parseHabit);
   const logs = logRows.map(parseLog).filter(l => l.done && l.date >= from && l.date <= to);
 
-  function expectedFor(freq) {
-    if (freq === 'weekly') return weeks;
-    if (freq === 'monthly') return range === 'month' ? 1 : 3;
-    if (freq === 'quarterly') return range === 'quarter' ? 1 : 0.34;
-    return days; // daily / daily-multi
+  // 暫時性項目（例如只吃一週的藥）的分母只算它跟報表區間重疊的那幾天，否則一週的藥會被當成整個月在算。
+  function periodsFor(h) {
+    let d = days, w = weeks;
+    if (h.is_temporary && h.start_date && h.end_date) {
+      const s = h.start_date > from ? h.start_date : from;
+      const e = h.end_date < to ? h.end_date : to;
+      if (s > e) return 0;
+      d = Math.round((Date.parse(e) - Date.parse(s)) / 86400000) + 1;
+      w = Math.ceil(d / 7);
+    }
+    if (h.frequency_type === 'weekly') return w;
+    if (h.frequency_type === 'monthly') return range === 'month' ? 1 : 3;
+    if (h.frequency_type === 'quarterly') return range === 'quarter' ? 1 : 0.34;
+    return d; // daily / daily-multi
   }
 
+  // 一個週期內可能要打好幾次卡（daily-multi 的時段、weekly 的 target_count），分母要跟著乘。
   const habitStats = habits.map(h => {
-    const completed = new Set(logs.filter(l => l.habit_id === h.habit_id).map(l => l.period_key)).size;
-    const expected = expectedFor(h.frequency_type) || 1;
+    const completed = new Set(logs.filter(l => l.habit_id === h.habit_id).map(l => `${l.period_key}|${l.slot}`)).size;
+    const perPeriod = h.frequency_detail.length || h.target_count || 1;
+    const expected = (periodsFor(h) || 1) * perPeriod;
     const rate = Math.min(1, completed / expected);
     return { habit_id: h.habit_id, habit_name: h.habit_name, emoji: h.emoji, project_ids: h.project_ids, completed, expected, rate };
   });

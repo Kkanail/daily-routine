@@ -184,6 +184,50 @@
     }
 
     // 點選順序 = 儲存順序；第一個選的 project 決定它在今日清單裡被分到哪一組。
+    // 一個週期要做好幾次的項目（例如一週看三個 section）：一列搞定，右邊每個點是一次。
+    function CountHabitRow({ habit, periodKey, logsByKey, onToggle, onEditNote, pendingKeys, failedKeys }) {
+      const target = habit.target_count;
+      const slots = Array.from({ length: target }, (_, i) => String(i + 1));
+      const rowFor = (s) => logsByKey.get(logKey(habit.habit_id, periodKey, s));
+      const isDone = (s) => { const r = rowFor(s); return !!(r && r.done); };
+      const count = slots.filter(isDone).length;
+      const complete = count >= target;
+      const nextEmpty = slots.find(s => !isDone(s));
+      const lastFilled = [...slots].reverse().find(isDone);
+      const pending = slots.some(s => pendingKeys.has(habit.habit_id + '|' + s));
+      const failed = slots.some(s => failedKeys.has(habit.habit_id + '|' + s));
+      const notes = slots.map(s => { const r = rowFor(s); return (r && r.done && r.note) ? { s, note: r.note } : null; }).filter(Boolean);
+
+      return (
+        <div style={{ borderRadius: 12, overflow: "hidden", border: `1.5px solid ${complete ? "#4caf7d" : "#e8e8e8"}`, background: complete ? "#eef7ee" : "#fafafa", transition: "all 0.18s" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px" }}>
+            <div onClick={() => onToggle(habit, nextEmpty || lastFilled)} style={{ width: 23, height: 23, borderRadius: 6, flexShrink: 0, cursor: "pointer", border: `2px solid ${complete ? "#4caf7d" : "#ccc"}`, background: complete ? "#4caf7d" : "white", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {complete && <span style={{ color: "white", fontSize: 13, fontWeight: 700 }}>✓</span>}
+            </div>
+            <span style={{ fontSize: 18 }}>{habit.emoji}</span>
+            <span onClick={() => onToggle(habit, nextEmpty || lastFilled)} style={{ flex: 1, fontSize: 14, fontWeight: 500, cursor: "pointer", color: complete ? "#333" : "#666", textDecoration: complete ? "line-through" : "none" }}>{habit.habit_name}</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: complete ? "#4caf7d" : "#bbb" }}>{count}/{target}</span>
+            <div style={{ display: "flex", gap: 5 }}>
+              {slots.map(s => (
+                <div key={s} onClick={() => onToggle(habit, s)} title={`第 ${s} 次`}
+                  style={{ width: 17, height: 17, borderRadius: "50%", cursor: "pointer", border: `2px solid ${isDone(s) ? "#4caf7d" : "#d5d5d5"}`, background: isDone(s) ? "#4caf7d" : "white" }} />
+              ))}
+            </div>
+            {pending && <span style={{ fontSize: 13 }}>⏳</span>}
+            {failed && <span title="同步失敗" style={{ fontSize: 13 }}>⚠️</span>}
+            {lastFilled && (
+              <button onClick={() => onEditNote(habit, lastFilled)} style={{ background: "#f5f5f5", border: "1px solid #e0e0e0", borderRadius: 7, padding: "3px 8px", cursor: "pointer", fontSize: 12, color: "#bbb", fontWeight: 600 }}>備注</button>
+            )}
+          </div>
+          {notes.length > 0 && (
+            <div style={{ padding: "5px 14px 10px 47px", fontSize: 12, color: "#888", lineHeight: 1.6, borderTop: "1px solid #e8f5e9" }}>
+              {notes.map(n => <div key={n.s} onClick={() => onEditNote(habit, n.s)} style={{ cursor: "pointer" }}>{n.s}. {n.note}</div>)}
+            </div>
+          )}
+        </div>
+      );
+    }
+
     function AddAdhocRow({ onAdd, projects }) {
       const [open, setOpen] = useState(false);
       const [name, setName] = useState("");
@@ -289,6 +333,12 @@
                 );
               })}
             </div>
+          );
+        }
+        if ((h.target_count || 1) > 1) {
+          return (
+            <CountHabitRow key={h.habit_id} habit={h} periodKey={periodKey} logsByKey={logsByKey}
+              onToggle={onToggle} onEditNote={onEditNote} pendingKeys={pendingKeys} failedKeys={failedKeys} />
           );
         }
         const k = logKey(h.habit_id, periodKey, '');
@@ -790,7 +840,8 @@
             const periodKey = periodKeyForFrequency(noteTarget.habit.frequency_type, ctx);
             const row = logsByKey.get(logKey(noteTarget.habit.habit_id, periodKey, noteTarget.slot));
             return (
-              <NotePopup label={noteTarget.slot ? `${noteTarget.habit.habit_name} · ${noteTarget.slot}` : noteTarget.habit.habit_name}
+              <NotePopup label={!noteTarget.slot ? noteTarget.habit.habit_name
+                  : (noteTarget.habit.target_count > 1 ? `${noteTarget.habit.habit_name} · 第${noteTarget.slot}次` : `${noteTarget.habit.habit_name} · ${noteTarget.slot}`)}
                 icon={noteTarget.habit.emoji} existingNote={row && row.note}
                 onSubmit={handleNoteSubmit} onClose={() => setNoteTarget(null)}
                 projects={noteTarget.habit.pinned ? null : projects}
