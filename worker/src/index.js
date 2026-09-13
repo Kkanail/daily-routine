@@ -97,8 +97,9 @@ async function handlePostLog(env, request) {
 
 async function handlePostHabit(env, request) {
   const body = await request.json();
-  const { habit_name, emoji = '📌', project_ids = [] } = body;
+  const { habit_name, emoji = '📌', project_ids = [], is_temporary = false, start_date = '', end_date = '' } = body;
   if (!habit_name) return json(env, { error: 'habit_name is required' }, 400);
+  if (is_temporary && (!start_date || !end_date)) return json(env, { error: 'temporary habits need start_date and end_date' }, 400);
 
   const { headers } = await readTable(env, 'Habits');
   const headersFinal = headers.length ? headers : HABITS_HEADERS;
@@ -107,7 +108,7 @@ async function handlePostHabit(env, request) {
     habit_id, habit_name, emoji,
     project_ids: Array.isArray(project_ids) ? project_ids.join(',') : String(project_ids || ''),
     frequency_type: 'daily', frequency_detail: '',
-    is_temporary: false, start_date: '', end_date: '',
+    is_temporary: !!is_temporary, start_date, end_date,
     active: true, pinned: false,
   };
   await appendRow(env, 'Habits', headersFinal, rowObj);

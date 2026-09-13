@@ -162,11 +162,45 @@
       );
     }
 
-    function ChecklistTab({ habits, projects, logsByKey, ctx, onToggle, onEditNote, onAddAdhoc, pendingKeys, failedKeys }) {
+    function AddDatedRow({ onAdd, defaultDate }) {
+      const [open, setOpen] = useState(false);
+      const [name, setName] = useState("");
+      const [date, setDate] = useState(defaultDate);
+      const submit = () => { if (name.trim() && date) { onAdd(name.trim(), date); setName(""); setOpen(false); } };
+      if (!open) {
+        return <button onClick={() => setOpen(true)} style={{ width: "100%", padding: "10px 0", background: "transparent", border: "1.5px dashed #ccc", borderRadius: 12, color: "#999", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>📅 排入某天的單次待辦</button>;
+      }
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <input autoFocus value={name} onChange={e => setName(e.target.value)}
+            placeholder="例如：領包裹"
+            onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+            style={{ padding: "10px 13px", borderRadius: 10, border: "1.5px solid #ccc", fontSize: 14, outline: "none" }} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+              style={{ flex: 1, padding: "9px 13px", borderRadius: 10, border: "1.5px solid #ccc", fontSize: 14, outline: "none" }} />
+            <button onClick={submit}
+              style={{ padding: "0 16px", background: "#1a1a2e", color: "white", border: "none", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>排入</button>
+            <button onClick={() => setOpen(false)}
+              style={{ padding: "0 12px", background: "#f5f5f5", color: "#888", border: "none", borderRadius: 10, cursor: "pointer" }}>✕</button>
+          </div>
+        </div>
+      );
+    }
+
+    function ChecklistTab({ habits, projects, logsByKey, ctx, onToggle, onEditNote, onAddAdhoc, onAddDated, pendingKeys, failedKeys }) {
       const hasLogThisPeriod = (habit) => {
         const pk = periodKeyForFrequency(habit.frequency_type, ctx);
         for (const k of logsByKey.keys()) { if (k.startsWith(habit.habit_id + '|' + pk + '|')) return true; }
         return false;
+      };
+
+      // 有指定日期區間的單次待辦：只看今天是否落在區間內，不管 pinned 或有沒有打過卡。
+      const isVisible = (habit) => {
+        if (habit.is_temporary && habit.start_date && habit.end_date) {
+          return ctx.todayKey >= habit.start_date && ctx.todayKey <= habit.end_date;
+        }
+        return habit.pinned || hasLogThisPeriod(habit);
       };
 
       const renderItem = (h) => {
@@ -201,7 +235,7 @@
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
           {BLOCK_DEFS.map(block => {
-            const items = habits.filter(h => block.freqs.includes(h.frequency_type) && (h.pinned || hasLogThisPeriod(h)));
+            const items = habits.filter(h => block.freqs.includes(h.frequency_type) && isVisible(h));
             const groups = block.key === 'daily' ? groupByProject(items, projects) : null;
             return (
               <div key={block.key}>
@@ -217,6 +251,7 @@
                       ))
                     : items.map(renderItem)}
                   {block.key === 'daily' && <AddAdhocRow onAdd={onAddAdhoc} />}
+                  {block.key === 'daily' && <AddDatedRow onAdd={onAddDated} defaultDate={ctx.todayKey} />}
                 </div>
               </div>
             );
@@ -483,20 +518,35 @@
         } catch (e) { alert('新增失敗，稍後再試一次'); }
       }, [postLog]);
 
+      const handleAddDated = useCallback(async (name, date) => {
+        try {
+          const res = await fetch(`${WORKER_URL}/api/habits`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ habit_name: name, emoji: '📅', is_temporary: true, start_date: date, end_date: date }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'failed');
+          setHabits(prev => [...prev, { habit_id: data.habit_id, habit_name: name, emoji: '📅', project_ids: [], frequency_type: 'daily', frequency_detail: [], is_temporary: true, start_date: date, end_date: date, active: true, pinned: false }]);
+        } catch (e) { alert('新增失敗，稍後再試一次'); }
+      }, []);
+
       const todayDoneCount = useMemo(() => {
         const dailyHabits = habits.filter(h => (h.frequency_type === 'daily' || h.frequency_type === 'daily-multi'));
         let total = 0, done = 0;
         for (const h of dailyHabits) {
+          const dated = h.is_temporary && h.start_date && h.end_date;
+          const inRange = dated && ctx.todayKey >= h.start_date && ctx.todayKey <= h.end_date;
+          if (dated && !inRange) continue;
           if (h.frequency_type === 'daily-multi' && h.frequency_detail.length > 0) {
             for (const slot of h.frequency_detail) {
-              if (!h.pinned && !logsByKey.has(logKey(h.habit_id, ctx.todayKey, slot))) continue;
+              if (!h.pinned && !inRange && !logsByKey.has(logKey(h.habit_id, ctx.todayKey, slot))) continue;
               total++;
               const row = logsByKey.get(logKey(h.habit_id, ctx.todayKey, slot));
               if (row && row.done) done++;
             }
           } else {
             const row = logsByKey.get(logKey(h.habit_id, ctx.todayKey, ''));
-            if (!h.pinned && !row) continue;
+            if (!h.pinned && !inRange && !row) continue;
             total++;
             if (row && row.done) done++;
           }
@@ -539,7 +589,7 @@
             {!loading && loadError && <div style={{ fontSize: 13, color: "#e74c3c", textAlign: "center", padding: "40px 0" }}>連線失敗，請檢查網路後重新整理</div>}
             {!loading && !loadError && tab === 'checklist' && (
               <ChecklistTab habits={habits} projects={projects} logsByKey={logsByKey} ctx={ctx}
-                onToggle={handleToggle} onEditNote={handleNoteClick} onAddAdhoc={handleAddAdhoc}
+                onToggle={handleToggle} onEditNote={handleNoteClick} onAddAdhoc={handleAddAdhoc} onAddDated={handleAddDated}
                 pendingKeys={pendingKeys} failedKeys={failedKeys} />
             )}
             {!loading && !loadError && tab === 'cat' && <CatTab ctx={ctx} />}
