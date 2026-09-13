@@ -391,7 +391,18 @@
       );
     }
 
-    const POMODORO_MS = 25 * 60 * 1000;
+    const POMODORO_OPTIONS = [15, 25].map(min => ({ min, ms: min * 60 * 1000 }));
+    const POMODORO_DEFAULT_MS = 25 * 60 * 1000;
+
+    // 這個項目在目前週期裡還沒勾的第一格（單次項目是 ''、多時段是時段名、一週 N 次是序號）；全部勾完回傳 null。
+    function nextOpenSlot(habit, logsByKey, ctx) {
+      const periodKey = periodKeyForFrequency(habit.frequency_type, ctx);
+      const slots = habit.frequency_type === 'daily-multi' && habit.frequency_detail.length
+        ? habit.frequency_detail
+        : (habit.target_count > 1 ? Array.from({ length: habit.target_count }, (_, i) => String(i + 1)) : ['']);
+      const open = slots.find(s => { const r = logsByKey.get(logKey(habit.habit_id, periodKey, s)); return !(r && r.done); });
+      return open === undefined ? null : open;
+    }
 
     // AudioContext 要在使用者動作（按 GO）當下建立/恢復，否則 iOS 不給發聲。
     let audioCtx = null;
@@ -416,15 +427,27 @@
       return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
     }
 
-    function PomodoroTab({ blocks, projects, pomo, onStart, onPause, onReset, onPickTask, onAddAdhoc }) {
+    function PomodoroTab({ blocks, projects, pomo, taskAlreadyDone, onStart, onPause, onReset, onSetDuration, onCompleteTask, onPickTask, onAddAdhoc }) {
       const running = !!pomo.endsAt;
-      const idle = !running && pomo.remaining === POMODORO_MS && !pomo.done;
+      const idle = !running && pomo.remaining === pomo.durationMs && !pomo.done;
       const allItems = blocks.flatMap(b => b.items);
       const task = allItems.find(h => h.habit_id === pomo.taskId);
       const ringColor = pomo.done ? "#4caf7d" : running ? "#e74c3c" : "#bbb";
 
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <div style={{ display: "flex", gap: 6, padding: 4, background: "#eee", borderRadius: 12, opacity: running ? 0.5 : 1 }}>
+            {POMODORO_OPTIONS.map(o => {
+              const on = pomo.durationMs === o.ms;
+              return (
+                <button key={o.min} disabled={running} onClick={() => onSetDuration(o.ms)}
+                  style={{ flex: 1, padding: "8px 0", borderRadius: 9, border: "none", background: on ? "white" : "transparent", color: on ? "#1a1a2e" : "#999", fontWeight: 700, fontSize: 13, cursor: running ? "default" : "pointer", boxShadow: on ? "0 1px 4px rgba(0,0,0,0.08)" : "none" }}>
+                  {o.min} 分鐘
+                </button>
+              );
+            })}
+          </div>
+
           <div style={{ background: "white", borderRadius: 20, border: `2px solid ${ringColor}`, padding: "28px 20px", textAlign: "center", transition: "border-color 0.3s" }}>
             <div style={{ fontSize: 52, fontWeight: 900, letterSpacing: -2, color: pomo.done ? "#4caf7d" : "#1a1a2e", lineHeight: 1.1, fontVariantNumeric: "tabular-nums" }}>
               {mmss(pomo.remaining)}
@@ -452,16 +475,31 @@
             <AddAdhocRow onAdd={onAddAdhoc} projects={projects} />
           </div>
 
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={running ? onPause : onStart}
-              style={{ flex: 1, padding: "15px 0", background: running ? "#f5f5f5" : "#e74c3c", color: running ? "#666" : "white", border: "none", borderRadius: 12, fontWeight: 900, fontSize: 16, letterSpacing: 1, cursor: "pointer" }}>
-              {running ? "暫停" : pomo.done ? "再一輪" : idle ? "GO" : "繼續"}
-            </button>
-            {!idle && (
-              <button onClick={onReset}
-                style={{ padding: "0 18px", background: "#f5f5f5", color: "#888", border: "none", borderRadius: 12, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>重設</button>
-            )}
-          </div>
+          {pomo.done ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              {task && (
+                <button onClick={onCompleteTask} disabled={taskAlreadyDone}
+                  style={{ flex: 1, padding: "15px 0", background: taskAlreadyDone ? "#e8e8e8" : "#4caf7d", color: taskAlreadyDone ? "#999" : "white", border: "none", borderRadius: 12, fontWeight: 900, fontSize: 16, cursor: taskAlreadyDone ? "default" : "pointer" }}>
+                  {taskAlreadyDone ? "已經勾完了" : "✓ 任務完成"}
+                </button>
+              )}
+              <button onClick={onStart}
+                style={{ flex: 1, padding: "15px 0", background: "#e74c3c", color: "white", border: "none", borderRadius: 12, fontWeight: 900, fontSize: 16, cursor: "pointer" }}>
+                再來一次
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={running ? onPause : onStart}
+                style={{ flex: 1, padding: "15px 0", background: running ? "#f5f5f5" : "#e74c3c", color: running ? "#666" : "white", border: "none", borderRadius: 12, fontWeight: 900, fontSize: 16, letterSpacing: 1, cursor: "pointer" }}>
+                {running ? "暫停" : idle ? "GO" : "繼續"}
+              </button>
+              {!idle && (
+                <button onClick={onReset}
+                  style={{ padding: "0 18px", background: "#f5f5f5", color: "#888", border: "none", borderRadius: 12, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>重設</button>
+              )}
+            </div>
+          )}
         </div>
       );
     }
@@ -733,7 +771,7 @@
       const [pendingKeys, setPendingKeys] = useState(() => new Set());
       const [failedKeys, setFailedKeys] = useState(() => new Set());
       // 計時狀態放在 App，切分頁不會把倒數打斷；用結束時間戳算剩餘秒數，背景節流也不會走鐘。
-      const [pomo, setPomo] = useState({ taskId: '', endsAt: null, remaining: POMODORO_MS, done: false });
+      const [pomo, setPomo] = useState({ taskId: '', durationMs: POMODORO_DEFAULT_MS, endsAt: null, remaining: POMODORO_DEFAULT_MS, done: false });
 
       useEffect(() => {
         if (!pomo.endsAt) return;
@@ -876,7 +914,7 @@
       const startPomo = useCallback(() => {
         primeAudio();
         setPomo(p => {
-          const remaining = p.done ? POMODORO_MS : p.remaining;
+          const remaining = p.done ? p.durationMs : p.remaining;
           return { ...p, remaining, endsAt: Date.now() + remaining, done: false };
         });
       }, []);
@@ -884,8 +922,22 @@
         setPomo(p => p.endsAt ? { ...p, remaining: Math.max(0, p.endsAt - Date.now()), endsAt: null } : p);
       }, []);
       const resetPomo = useCallback(() => {
-        setPomo(p => ({ ...p, endsAt: null, remaining: POMODORO_MS, done: false }));
+        setPomo(p => ({ ...p, endsAt: null, remaining: p.durationMs, done: false }));
       }, []);
+      // 跑的時候不能換時長；暫停或跑完時換，就直接重設成新的時長。
+      const setPomoDuration = useCallback((ms) => {
+        setPomo(p => p.endsAt ? p : { ...p, durationMs: ms, remaining: ms, done: false });
+      }, []);
+
+      const pomoTask = habits.find(h => h.habit_id === pomo.taskId);
+      const pomoTaskOpenSlot = pomoTask ? nextOpenSlot(pomoTask, logsByKey, ctx) : null;
+
+      // 走跟打卡頁一樣的勾選流程（跳備注視窗），勾的是這個項目下一個還沒勾的格子。
+      const completePomoTask = useCallback(() => {
+        if (!pomoTask || pomoTaskOpenSlot === null) return;
+        setNoteTarget({ habit: pomoTask, slot: pomoTaskOpenSlot });
+        setPomo(p => ({ ...p, endsAt: null, remaining: p.durationMs, done: false }));
+      }, [pomoTask, pomoTaskOpenSlot]);
 
       const todayDoneCount = useMemo(() => {
         const dailyHabits = habits.filter(h => (h.frequency_type === 'daily' || h.frequency_type === 'daily-multi'));
@@ -947,7 +999,9 @@
             {!loading && loadError && <div style={{ fontSize: 13, color: "#e74c3c", textAlign: "center", padding: "40px 0" }}>連線失敗，請檢查網路後重新整理</div>}
             {!loading && !loadError && tab === 'pomodoro' && (
               <PomodoroTab blocks={buildBlocks(habits, logsByKey, ctx)} projects={projects} pomo={pomo}
+                taskAlreadyDone={!!pomoTask && pomoTaskOpenSlot === null}
                 onStart={startPomo} onPause={pausePomo} onReset={resetPomo}
+                onSetDuration={setPomoDuration} onCompleteTask={completePomoTask}
                 onPickTask={(id) => setPomo(p => ({ ...p, taskId: id }))}
                 onAddAdhoc={async (name, project_ids) => { const id = await handleAddAdhoc(name, project_ids); if (id) setPomo(p => ({ ...p, taskId: id })); }} />
             )}
