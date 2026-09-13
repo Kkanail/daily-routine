@@ -77,4 +77,13 @@ async function getSpreadsheetMeta(env) {
   return sheetsFetch(env, '');
 }
 
-export { readTable, writeRow, appendRow, batchUpdate, getSpreadsheetMeta, getValues, rowValuesFromHeaders };
+async function deleteRow(env, sheetName, rowNumber) {
+  const meta = await getSpreadsheetMeta(env);
+  const sheet = meta.sheets.find(s => s.properties.title === sheetName);
+  if (!sheet) throw new Error(`sheet not found: ${sheetName}`);
+  return batchUpdate(env, [{
+    deleteDimension: { range: { sheetId: sheet.properties.sheetId, dimension: 'ROWS', startIndex: rowNumber - 1, endIndex: rowNumber } },
+  }]);
+}
+
+export { readTable, writeRow, appendRow, deleteRow, batchUpdate, getSpreadsheetMeta, getValues, rowValuesFromHeaders };

@@ -1,4 +1,4 @@
-import { readTable, writeRow, appendRow } from './sheets.js';
+import { readTable, writeRow, appendRow, deleteRow } from './sheets.js';
 import { putPhoto, getPhoto } from './r2.js';
 import {
   businessDateParts, dayKey, periodKeyFor, currentTimeHHMM,
@@ -7,7 +7,32 @@ import {
 
 const HABITS_HEADERS = ['habit_id', 'habit_name', 'emoji', 'project_ids', 'frequency_type', 'frequency_detail', 'is_temporary', 'start_date', 'end_date', 'active', 'pinned'];
 const LOG_HEADERS = ['date', 'time', 'habit_id', 'slot', 'period_key', 'done', 'note'];
-const CATLOG_HEADERS = ['date', 'time', 'category', 'description', 'photo_url'];
+const CATLOG_HEADERS = ['date', 'time', 'category', 'description', 'photo_url', 'source'];
+
+// 掛在胖貓 project 底下的打卡，同步寫一列進 Cat Log（獸醫要看完整紀錄）；取消勾選就把那列刪掉。
+async function mirrorToCatLog(env, habit, { date, time, slot, done, note }) {
+  const projectIds = (habit.project_ids || '').split(',').map(s => s.trim());
+  if (!projectIds.includes(env.CAT_PROJECT_ID)) return;
+
+  const source = `${habit.habit_id}|${date}|${slot || ''}`;
+  const { headers, rows } = await readTable(env, 'Cat Log');
+  const headersFinal = headers.length ? headers : CATLOG_HEADERS;
+  const existing = rows.find(r => r.source === source);
+
+  if (!done) {
+    if (existing) await deleteRow(env, 'Cat Log', existing._row);
+    return;
+  }
+  const rowObj = {
+    date, time,
+    category: habit.habit_name.includes('藥') ? '用藥' : '其他',
+    description: `${habit.habit_name}${slot ? ` · ${slot}` : ''}${note ? `｜${note}` : ''}`,
+    photo_url: existing ? existing.photo_url : '',
+    source,
+  };
+  if (existing) await writeRow(env, 'Cat Log', existing._row, headersFinal, rowObj);
+  else await appendRow(env, 'Cat Log', headersFinal, rowObj);
+}
 
 function corsHeaders(env) {
   return {
@@ -92,14 +117,16 @@ async function handlePostLog(env, request) {
   } else {
     await appendRow(env, 'Daily Log', headersFinal, rowObj);
   }
+  await mirrorToCatLog(env, habit, { date, time, slot, done: !!done, note });
   return json(env, { ok: true, date, period_key });
 }
 
 async function handlePostHabit(env, request) {
   const body = await request.json();
-  const { habit_name, emoji = '📌', project_ids = [], is_temporary = false, start_date = '', end_date = '' } = body;
+  const { habit_name, emoji = '📌', project_ids = [], is_temporary = false, start_date = '', end_date = '', frequency_detail = [] } = body;
   if (!habit_name) return json(env, { error: 'habit_name is required' }, 400);
   if (is_temporary && (!start_date || !end_date)) return json(env, { error: 'temporary habits need start_date and end_date' }, 400);
+  const slots = (Array.isArray(frequency_detail) ? frequency_detail : String(frequency_detail || '').split(',')).map(s => s.trim()).filter(Boolean);
 
   const { headers } = await readTable(env, 'Habits');
   const headersFinal = headers.length ? headers : HABITS_HEADERS;
@@ -107,7 +134,7 @@ async function handlePostHabit(env, request) {
   const rowObj = {
     habit_id, habit_name, emoji,
     project_ids: Array.isArray(project_ids) ? project_ids.join(',') : String(project_ids || ''),
-    frequency_type: 'daily', frequency_detail: '',
+    frequency_type: slots.length ? 'daily-multi' : 'daily', frequency_detail: slots.join(','),
     is_temporary: !!is_temporary, start_date, end_date,
     active: true, pinned: false,
   };
@@ -121,7 +148,7 @@ async function handleGetCatlog(env, url) {
   const entries = rows
     .filter(r => !month || (r.date || '').startsWith(month))
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
-    .map(r => ({ date: r.date, time: r.time, category: r.category, description: r.description, photo_url: r.photo_url }));
+    .map(r => ({ date: r.date, time: r.time, category: r.category, description: r.description, photo_url: r.photo_url, source: r.source || '' }));
   return json(env, { entries });
 }
 

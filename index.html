@@ -177,15 +177,18 @@
       );
     }
 
-    function AddDatedRow({ onAdd, defaultDate }) {
+    function AddDatedRow({ onAdd, defaultDate, projects }) {
       const [open, setOpen] = useState(false);
       const [name, setName] = useState("");
       const [start, setStart] = useState(defaultDate);
       const [end, setEnd] = useState(defaultDate);
+      const [slots, setSlots] = useState("");
+      const [projectId, setProjectId] = useState("");
       const submit = () => {
         if (!name.trim() || !start || !end) return;
         const [a, b] = start <= end ? [start, end] : [end, start];
-        onAdd(name.trim(), a, b); setName(""); setOpen(false);
+        onAdd(name.trim(), a, b, { slots: slots.split(/[,，、\s]+/).map(s => s.trim()).filter(Boolean), projectId });
+        setName(""); setSlots(""); setProjectId(""); setOpen(false);
       };
       const dateStyle = { flex: 1, minWidth: 0, padding: "9px 10px", borderRadius: 10, border: "1.5px solid #ccc", fontSize: 14, outline: "none" };
       if (!open) {
@@ -203,12 +206,19 @@
             <input type="date" value={end} min={start} onChange={e => setEnd(e.target.value)} style={dateStyle} />
           </div>
           <div style={{ display: "flex", gap: 8 }}>
+            <select value={projectId} onChange={e => setProjectId(e.target.value)} style={{ ...dateStyle, background: "white" }}>
+              <option value="">（不分類）</option>
+              {projects.map(p => <option key={p.project_id} value={p.project_id}>{p.project_name || p.project_id}</option>)}
+            </select>
+            <input value={slots} onChange={e => setSlots(e.target.value)} placeholder="時段（選填）例：早,晚,睡前" style={dateStyle} />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
             <button onClick={submit}
               style={{ flex: 1, padding: "10px 0", background: "#1a1a2e", color: "white", border: "none", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>排入</button>
             <button onClick={() => setOpen(false)}
               style={{ padding: "0 14px", background: "#f5f5f5", color: "#888", border: "none", borderRadius: 10, cursor: "pointer" }}>✕</button>
           </div>
-          <div style={{ fontSize: 11, color: "#bbb" }}>單日就把兩個日期選一樣；期間內任何一天勾掉，之後就不會再出現。</div>
+          <div style={{ fontSize: 11, color: "#bbb", lineHeight: 1.5 }}>單日就把兩個日期選一樣；期間內任何一天勾掉，之後就不會再出現。填了時段就變成一天多次（每個時段各一格，每天都要勾）。</div>
         </div>
       );
     }
@@ -277,7 +287,7 @@
                       ))
                     : items.map(renderItem)}
                   {block.key === 'daily' && <AddAdhocRow onAdd={onAddAdhoc} />}
-                  {block.key === 'daily' && <AddDatedRow onAdd={onAddDated} defaultDate={ctx.todayKey} />}
+                  {block.key === 'daily' && <AddDatedRow onAdd={onAddDated} defaultDate={ctx.todayKey} projects={projects} />}
                 </div>
               </div>
             );
@@ -286,7 +296,7 @@
       );
     }
 
-    const CAT_CATEGORIES = ["吐", "餵食-乾乾", "餵食-罐罐", "特殊補給", "其他"];
+    const CAT_CATEGORIES = ["吐", "用藥", "餵食-乾乾", "餵食-罐罐", "特殊補給", "其他"];
 
     function CatTab({ ctx }) {
       const [entries, setEntries] = useState([]);
@@ -369,7 +379,7 @@
               <div key={i} style={{ background: "white", borderRadius: 12, padding: "10px 14px", border: "1.5px solid #eee", display: "flex", gap: 10 }}>
                 {e.photo_url && <img src={e.photo_url} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8, flexShrink: 0 }} />}
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, color: "#aaa" }}>{e.date} {e.time}　<span style={{ color: "#f5a623", fontWeight: 700 }}>{e.category}</span></div>
+                  <div style={{ fontSize: 12, color: "#aaa" }}>{e.date} {e.time}　<span style={{ color: "#f5a623", fontWeight: 700 }}>{e.category}</span>{e.source && <span style={{ marginLeft: 6, fontSize: 10, color: "#bbb", border: "1px solid #e5e5e5", borderRadius: 4, padding: "0 4px" }}>來自打卡</span>}</div>
                   {e.description && <div style={{ fontSize: 13, color: "#555", marginTop: 3 }}>{e.description}</div>}
                 </div>
               </div>
@@ -644,15 +654,16 @@
         } catch (e) { alert('新增失敗，稍後再試一次'); }
       }, [postLog]);
 
-      const handleAddDated = useCallback(async (name, start, end) => {
+      const handleAddDated = useCallback(async (name, start, end, { slots = [], projectId = '' } = {}) => {
         try {
+          const project_ids = projectId ? [projectId] : [];
           const res = await fetch(`${WORKER_URL}/api/habits`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ habit_name: name, emoji: '📅', is_temporary: true, start_date: start, end_date: end }),
+            body: JSON.stringify({ habit_name: name, emoji: '📅', is_temporary: true, start_date: start, end_date: end, project_ids, frequency_detail: slots }),
           });
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || 'failed');
-          setHabits(prev => [...prev, { habit_id: data.habit_id, habit_name: name, emoji: '📅', project_ids: [], frequency_type: 'daily', frequency_detail: [], is_temporary: true, start_date: start, end_date: end, active: true, pinned: false }]);
+          setHabits(prev => [...prev, { habit_id: data.habit_id, habit_name: name, emoji: '📅', project_ids, frequency_type: slots.length ? 'daily-multi' : 'daily', frequency_detail: slots, is_temporary: true, start_date: start, end_date: end, active: true, pinned: false }]);
         } catch (e) { alert('新增失敗，稍後再試一次'); }
       }, []);
 
