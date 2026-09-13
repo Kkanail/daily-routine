@@ -1,0 +1,14 @@
+# 憑證類，絕對不要進版本控制
+daily-routine-*.json
+*service-account*.json
+*credentials*.json
+*secret*.json
+*.pem
+*.key
+.env
+.env.*
+.dev.vars
+
+node_modules/
+.wrangler/
+.DS_Store
