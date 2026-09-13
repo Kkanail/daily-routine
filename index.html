@@ -367,7 +367,7 @@
         <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
           {blocks.map(block => {
             const items = block.items;
-            const groups = block.key === 'daily' ? groupByProject(items, projects) : null;
+            const groups = groupByProject(items, projects);
             return (
               <div key={block.key}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: "#999", marginBottom: 8, letterSpacing: 0.5 }}>{block.title}</div>
