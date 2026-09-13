@@ -19,6 +19,7 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: linear-gradient(160deg, #f8f6ff 0%, #eaf4fd 55%, #fff9e6 100%); min-height: 100vh; font-family: 'Noto Sans TC', sans-serif; }
     input, textarea, select, button { font-family: inherit; }
+    .pet-sprite.facing-left { transform: scaleX(-1); }
   </style>
 </head>
 <body>
@@ -416,6 +417,106 @@
       );
     }
 
+    // ── 小廢貓：從 desktop-pet 的 renderer.js 搬過來的走動/發呆狀態機（拿掉 Electron 拖曳那層）──
+    // sprite 512×640，每格 128px：row0 idle[睜眼,眨眼] row1 walk[0-3] row2 蹲坐→站起[0-2] row3 甩尾巴[0,1]
+    const PET_ANIM = {
+      idle:    { row: 0, frames: [0, 1], frameDuration: 500 },
+      walk:    { row: 1, frames: [0, 1, 2, 3], frameDuration: 150 },
+      standUp: { row: 2, frames: [0, 1, 2], frameDuration: 180, oneShot: true },
+      sitDown: { row: 2, frames: [2, 1, 0], frameDuration: 180, oneShot: true },
+      tail:    { row: 3, frames: [0, 1], frameDuration: 350 },
+    };
+    const PET_CELL = 128;
+    const PET_SCALE = 0.5;
+    const PET_RENDER = PET_CELL * PET_SCALE;
+
+    // 依今日完成率換心情：0% 懶洋洋、中間正常、100% 精力充沛還會蹦
+    function petMood(pct) {
+      if (pct >= 100) return { speed: 2.2, idleMin: 600, idleRange: 900, tailChance: 0.2, hop: true };
+      if (pct <= 0)   return { speed: 0.8, idleMin: 3000, idleRange: 4000, tailChance: 0.6, hop: false };
+      return { speed: 1.2, idleMin: 1500, idleRange: 2500, tailChance: 0.35, hop: false };
+    }
+
+    function Pet({ pct }) {
+      const wrapperRef = useRef(null);
+      const petRef = useRef(null);
+      const moodRef = useRef(petMood(pct));
+      useEffect(() => { moodRef.current = petMood(pct); }, [pct]);
+
+      useEffect(() => {
+        const wrapper = wrapperRef.current, pet = petRef.current;
+        let state = 'idle', frameIndex = 0, lastTs = 0, raf = 0;
+        let posX = Math.floor(window.innerWidth / 2), direction = 1;
+        let timer = 0, duration = 0, hopPhase = 0;
+        const anims = {};
+        for (const k in PET_ANIM) anims[k] = { ...PET_ANIM[k], _acc: 0, _done: false };
+
+        const switchState = (next) => { state = next; frameIndex = 0; anims[next]._acc = 0; anims[next]._done = false; };
+        const startIdle = () => { switchState('idle'); const m = moodRef.current; duration = m.idleMin + Math.random() * m.idleRange; timer = 0; };
+        const startTail = () => { switchState('tail'); duration = 1500 + Math.random() * 1500; timer = 0; };
+        const startWalk = () => {
+          switchState('walk');
+          direction = Math.random() < 0.5 ? -1 : 1;
+          pet.classList.toggle('facing-left', direction === 1); // 貓原圖面向左，往右走才鏡像
+          duration = 1000 + Math.random() * 2000; timer = 0;
+        };
+        const applyTransform = () => {
+          const hop = (state === 'walk' && moodRef.current.hop) ? Math.abs(Math.sin(hopPhase)) * 10 : 0;
+          wrapper.style.transform = `translateX(${posX}px) translateY(${-hop}px) scale(${PET_SCALE}) translateZ(0)`;
+        };
+
+        const update = (dt) => {
+          const maxX = window.innerWidth - PET_RENDER;
+          switch (state) {
+            case 'walk': {
+              timer += dt; hopPhase += dt / 90;
+              posX += direction * moodRef.current.speed * (dt / 16.6);
+              if (posX <= 0) { posX = 0; direction = 1; pet.classList.add('facing-left'); }
+              else if (posX >= maxX) { posX = maxX; direction = -1; pet.classList.remove('facing-left'); }
+              applyTransform();
+              if (timer >= duration) switchState('sitDown');
+              break;
+            }
+            case 'tail': { timer += dt; if (timer >= duration) startIdle(); break; }
+            case 'standUp': { if (anims.standUp._done) startWalk(); break; }
+            case 'sitDown': { if (anims.sitDown._done) startIdle(); break; }
+            default: {
+              timer += dt;
+              if (timer >= duration) { Math.random() < moodRef.current.tailChance ? startTail() : switchState('standUp'); }
+            }
+          }
+        };
+
+        const animate = (ts) => {
+          if (!lastTs) lastTs = ts;
+          const dt = Math.min(ts - lastTs, 100); lastTs = ts;
+          update(dt);
+          const anim = anims[state];
+          anim._acc += dt;
+          if (anim._acc >= anim.frameDuration) {
+            anim._acc = 0;
+            if (anim.oneShot) { if (frameIndex < anim.frames.length - 1) frameIndex++; else anim._done = true; }
+            else frameIndex = (frameIndex + 1) % anim.frames.length;
+          }
+          pet.style.backgroundPosition = `-${anim.frames[frameIndex] * PET_CELL}px -${anim.row * PET_CELL}px`;
+          raf = requestAnimationFrame(animate);
+        };
+
+        applyTransform();
+        startIdle();
+        raf = requestAnimationFrame(animate);
+        return () => cancelAnimationFrame(raf);
+      }, []);
+
+      return (
+        <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, height: PET_RENDER, pointerEvents: "none", zIndex: 5, overflow: "hidden" }}>
+          <div ref={wrapperRef} style={{ position: "absolute", bottom: 0, left: 0, width: PET_CELL, height: PET_CELL, transformOrigin: "bottom left", willChange: "transform" }}>
+            <div ref={petRef} className="pet-sprite" style={{ width: PET_CELL, height: PET_CELL, backgroundImage: "url('pet-sheet.png')", backgroundRepeat: "no-repeat", backgroundSize: "512px 640px", imageRendering: "pixelated" }} />
+          </div>
+        </div>
+      );
+    }
+
     function App() {
       const [tab, setTab] = useState('checklist');
       const [habits, setHabits] = useState([]);
@@ -560,7 +661,8 @@
       const TABS = [['checklist', '打卡'], ['cat', '胖貓記錄'], ['report', '報表']];
 
       return (
-        <div style={{ minHeight: "100vh", paddingBottom: 60 }}>
+        <div style={{ minHeight: "100vh", paddingBottom: 100 }}>
+          <Pet pct={pct} />
           <div style={{ background: "rgba(255,255,255,0.93)", backdropFilter: "blur(12px)", padding: "20px 24px 14px", borderBottom: "1px solid #f0f0f0", position: "sticky", top: 0, zIndex: 10, boxShadow: "0 2px 16px rgba(0,0,0,0.05)" }}>
             <div style={{ maxWidth: 520, margin: "0 auto" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
