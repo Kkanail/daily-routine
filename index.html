@@ -946,7 +946,7 @@
       const completePomoTask = useCallback(() => {
         if (!pomoTask || pomoTaskOpenSlot === null) return;
         postLog(pomoTask, pomoTaskOpenSlot, true, pomo.note.trim());
-        setPomo(p => ({ ...p, note: '', endsAt: null, remaining: p.durationMs, done: false }));
+        setPomo(p => ({ ...p, taskId: '', note: '', endsAt: null, remaining: p.durationMs, done: false }));
       }, [pomoTask, pomoTaskOpenSlot, pomo.note, postLog]);
 
       const todayDoneCount = useMemo(() => {
