@@ -118,10 +118,11 @@
       }));
     }
 
-    function NotePopup({ label, icon, existingNote, onSubmit, onClose }) {
+    function NotePopup({ label, icon, existingNote, onSubmit, onClose, projects, selectedProjects, onToggleProject }) {
       const [note, setNote] = useState(existingNote || "");
       const taRef = useRef(null);
       useEffect(() => { setTimeout(() => taRef.current && taRef.current.focus(), 50); }, []);
+      const showChips = !!(projects && onToggleProject);
       return (
         <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
           <div onClick={e => e.stopPropagation()} style={{ background: "white", borderRadius: "20px 20px 0 0", padding: "20px 20px 36px", width: "100%", maxWidth: 520, boxShadow: "0 -8px 40px rgba(0,0,0,0.15)" }}>
@@ -134,6 +135,12 @@
               placeholder="備注（選填，留空直接送出）…" rows={3}
               style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: "1.5px solid #e0e0e0", fontSize: 14, resize: "none", fontFamily: "'Noto Sans TC', sans-serif", outline: "none", lineHeight: 1.6 }}
             />
+            {showChips && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 11, color: "#bbb", marginBottom: 6 }}>歸屬 project（點一下就存，第一個決定分組）</div>
+                <ProjectChips projects={projects} selected={selectedProjects || []} onToggle={onToggleProject} />
+              </div>
+            )}
             <button onClick={() => onSubmit(note)} style={{ width: "100%", marginTop: 12, padding: "11px 0", background: "#1a1a2e", color: "white", border: "none", borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>✓ 完成勾選</button>
           </div>
         </div>
@@ -694,6 +701,24 @@
         } catch (e) { alert('新增失敗，稍後再試一次'); }
       }, []);
 
+      // 只開放給臨時加的項目（pinned=false）改 project；固定項目的歸屬在 Sheet 管理。
+      const toggleHabitProject = useCallback(async (habit, projectId) => {
+        const current = habit.project_ids || [];
+        const next = current.includes(projectId) ? current.filter(x => x !== projectId) : [...current, projectId];
+        setHabits(prev => prev.map(h => h.habit_id === habit.habit_id ? { ...h, project_ids: next } : h));
+        setNoteTarget(prev => prev && prev.habit.habit_id === habit.habit_id ? { ...prev, habit: { ...prev.habit, project_ids: next } } : prev);
+        try {
+          const res = await fetch(`${WORKER_URL}/api/habits/update`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ habit_id: habit.habit_id, project_ids: next }),
+          });
+          if (!res.ok) throw new Error('update failed');
+        } catch (e) {
+          setHabits(prev => prev.map(h => h.habit_id === habit.habit_id ? { ...h, project_ids: current } : h));
+          alert('更新 project 失敗，稍後再試一次');
+        }
+      }, []);
+
       const todayDoneCount = useMemo(() => {
         const dailyHabits = habits.filter(h => (h.frequency_type === 'daily' || h.frequency_type === 'daily-multi'));
         let total = 0, done = 0;
@@ -767,7 +792,10 @@
             return (
               <NotePopup label={noteTarget.slot ? `${noteTarget.habit.habit_name} · ${noteTarget.slot}` : noteTarget.habit.habit_name}
                 icon={noteTarget.habit.emoji} existingNote={row && row.note}
-                onSubmit={handleNoteSubmit} onClose={() => setNoteTarget(null)} />
+                onSubmit={handleNoteSubmit} onClose={() => setNoteTarget(null)}
+                projects={noteTarget.habit.pinned ? null : projects}
+                selectedProjects={noteTarget.habit.project_ids}
+                onToggleProject={noteTarget.habit.pinned ? null : (pid) => toggleHabitProject(noteTarget.habit, pid)} />
             );
           })()}
         </div>

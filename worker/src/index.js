@@ -142,6 +142,18 @@ async function handlePostHabit(env, request) {
   return json(env, { habit_id });
 }
 
+async function handleUpdateHabitProjects(env, request) {
+  const body = await request.json();
+  const { habit_id, project_ids = [] } = body;
+  if (!habit_id) return json(env, { error: 'habit_id is required' }, 400);
+  const { headers, rows } = await readTable(env, 'Habits');
+  const row = rows.find(r => r.habit_id === habit_id);
+  if (!row) return json(env, { error: `habit not found: ${habit_id}` }, 404);
+  const updated = { ...row, project_ids: (Array.isArray(project_ids) ? project_ids : []).join(',') };
+  await writeRow(env, 'Habits', row._row, headers, updated);
+  return json(env, { ok: true });
+}
+
 async function handleGetCatlog(env, url) {
   const month = url.searchParams.get('month');
   const { rows } = await readTable(env, 'Cat Log');
@@ -240,6 +252,7 @@ export default {
       if (url.pathname === '/api/log' && request.method === 'GET') return await handleGetLog(env, url);
       if (url.pathname === '/api/log' && request.method === 'POST') return await handlePostLog(env, request);
       if (url.pathname === '/api/habits' && request.method === 'POST') return await handlePostHabit(env, request);
+      if (url.pathname === '/api/habits/update' && request.method === 'POST') return await handleUpdateHabitProjects(env, request);
       if (url.pathname === '/api/catlog' && request.method === 'GET') return await handleGetCatlog(env, url);
       if (url.pathname === '/api/catlog' && request.method === 'POST') return await handlePostCatlog(env, request);
       if (url.pathname === '/api/upload' && request.method === 'POST') return await handleUpload(env, request);
