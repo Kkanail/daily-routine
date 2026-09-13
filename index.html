@@ -391,7 +391,7 @@
       );
     }
 
-    const POMODORO_OPTIONS = [15, 25].map(min => ({ min, ms: min * 60 * 1000 }));
+    const POMODORO_OPTIONS = [5, 15, 25].map(min => ({ min, ms: min * 60 * 1000 }));
     const POMODORO_DEFAULT_MS = 25 * 60 * 1000;
 
     // 這個項目在目前週期裡還沒勾的第一格（單次項目是 ''、多時段是時段名、一週 N 次是序號）；全部勾完回傳 null。
@@ -427,7 +427,7 @@
       return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
     }
 
-    function PomodoroTab({ blocks, projects, pomo, taskAlreadyDone, onStart, onPause, onReset, onSetDuration, onCompleteTask, onPickTask, onAddAdhoc }) {
+    function PomodoroTab({ blocks, projects, pomo, taskAlreadyDone, onStart, onPause, onReset, onSetDuration, onCompleteTask, onPickTask, onNoteChange, onAddAdhoc }) {
       const running = !!pomo.endsAt;
       const idle = !running && pomo.remaining === pomo.durationMs && !pomo.done;
       const allItems = blocks.flatMap(b => b.items);
@@ -468,6 +468,11 @@
                 </optgroup>
               ))}
             </select>
+            {task && (
+              <textarea value={pomo.note} onChange={e => onNoteChange(e.target.value)} rows={3}
+                placeholder="備注（選填，按「任務完成」時一起存）…"
+                style={{ width: "100%", marginTop: 10, padding: "10px 13px", borderRadius: 10, border: "1.5px solid #e0e0e0", fontSize: 14, resize: "none", fontFamily: "'Noto Sans TC', sans-serif", outline: "none", lineHeight: 1.6, background: "white" }} />
+            )}
           </div>
 
           <div>
@@ -771,7 +776,7 @@
       const [pendingKeys, setPendingKeys] = useState(() => new Set());
       const [failedKeys, setFailedKeys] = useState(() => new Set());
       // 計時狀態放在 App，切分頁不會把倒數打斷；用結束時間戳算剩餘秒數，背景節流也不會走鐘。
-      const [pomo, setPomo] = useState({ taskId: '', durationMs: POMODORO_DEFAULT_MS, endsAt: null, remaining: POMODORO_DEFAULT_MS, done: false });
+      const [pomo, setPomo] = useState({ taskId: '', note: '', durationMs: POMODORO_DEFAULT_MS, endsAt: null, remaining: POMODORO_DEFAULT_MS, done: false });
 
       useEffect(() => {
         if (!pomo.endsAt) return;
@@ -932,12 +937,12 @@
       const pomoTask = habits.find(h => h.habit_id === pomo.taskId);
       const pomoTaskOpenSlot = pomoTask ? nextOpenSlot(pomoTask, logsByKey, ctx) : null;
 
-      // 走跟打卡頁一樣的勾選流程（跳備注視窗），勾的是這個項目下一個還沒勾的格子。
+      // 備注已經在蕃茄鐘頁寫好了，直接勾這個項目下一個還沒勾的格子，不再跳備注視窗。
       const completePomoTask = useCallback(() => {
         if (!pomoTask || pomoTaskOpenSlot === null) return;
-        setNoteTarget({ habit: pomoTask, slot: pomoTaskOpenSlot });
-        setPomo(p => ({ ...p, endsAt: null, remaining: p.durationMs, done: false }));
-      }, [pomoTask, pomoTaskOpenSlot]);
+        postLog(pomoTask, pomoTaskOpenSlot, true, pomo.note.trim());
+        setPomo(p => ({ ...p, note: '', endsAt: null, remaining: p.durationMs, done: false }));
+      }, [pomoTask, pomoTaskOpenSlot, pomo.note, postLog]);
 
       const todayDoneCount = useMemo(() => {
         const dailyHabits = habits.filter(h => (h.frequency_type === 'daily' || h.frequency_type === 'daily-multi'));
@@ -1002,7 +1007,8 @@
                 taskAlreadyDone={!!pomoTask && pomoTaskOpenSlot === null}
                 onStart={startPomo} onPause={pausePomo} onReset={resetPomo}
                 onSetDuration={setPomoDuration} onCompleteTask={completePomoTask}
-                onPickTask={(id) => setPomo(p => ({ ...p, taskId: id }))}
+                onPickTask={(id) => setPomo(p => ({ ...p, taskId: id, note: '' }))}
+                onNoteChange={(note) => setPomo(p => ({ ...p, note }))}
                 onAddAdhoc={async (name, project_ids) => { const id = await handleAddAdhoc(name, project_ids); if (id) setPomo(p => ({ ...p, taskId: id })); }} />
             )}
             {!loading && !loadError && tab === 'checklist' && (
