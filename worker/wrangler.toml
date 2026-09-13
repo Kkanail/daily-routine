@@ -6,6 +6,7 @@ compatibility_date = "2024-09-23"
 SHEET_ID = "1qnR9i_Q4ZMi8tTO7BGBMoizQUdjUJsikKea51IQrI4Y"
 ALLOWED_ORIGIN = "https://kkanail.github.io"
 CAT_PROJECT_ID = "catty"
+JOURNAL_HABIT_ID = "12"
 
 [[r2_buckets]]
 binding = "PHOTOS"

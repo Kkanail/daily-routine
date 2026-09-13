@@ -119,6 +119,7 @@ async function handlePostLog(env, request) {
     await appendRow(env, 'Daily Log', headersFinal, rowObj);
   }
   await mirrorToCatLog(env, habit, { date, time, slot, done: !!done, note });
+  await mirrorToJournal(env, habit, { date, time, slot, done: !!done, note });
   return json(env, { ok: true, date, period_key });
 }
 
@@ -142,6 +143,26 @@ async function handlePostHabit(env, request) {
   };
   await appendRow(env, 'Habits', headersFinal, rowObj);
   return json(env, { habit_id });
+}
+
+const JOURNAL_HEADERS = ['date', 'time', 'content', 'source'];
+
+// 日摘記錄的備注同步成 Journal 分頁的一列（一天一列，但表結構允許一天多列，之後做專用編輯畫面不用改結構）。
+async function mirrorToJournal(env, habit, { date, time, slot, done, note }) {
+  if (habit.habit_id !== env.JOURNAL_HABIT_ID) return;
+
+  const source = `${habit.habit_id}|${date}|${slot || ''}`;
+  const { headers, rows } = await readTable(env, 'Journal');
+  const headersFinal = headers.length ? headers : JOURNAL_HEADERS;
+  const existing = rows.find(r => r.source === source);
+
+  if (!done || !note) {
+    if (existing) await deleteRow(env, 'Journal', existing._row);
+    return;
+  }
+  const rowObj = { date, time, content: note, source };
+  if (existing) await writeRow(env, 'Journal', existing._row, headersFinal, rowObj);
+  else await appendRow(env, 'Journal', headersFinal, rowObj);
 }
 
 async function handleUpdateHabitProjects(env, request) {

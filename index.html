@@ -118,7 +118,9 @@
       }));
     }
 
-    function NotePopup({ label, icon, existingNote, onSubmit, onClose, projects, selectedProjects, onToggleProject }) {
+    const JOURNAL_HABIT_ID = "12";
+
+    function NotePopup({ label, icon, existingNote, onSubmit, onClose, projects, selectedProjects, onToggleProject, rows }) {
       const [note, setNote] = useState(existingNote || "");
       const taRef = useRef(null);
       useEffect(() => { setTimeout(() => taRef.current && taRef.current.focus(), 50); }, []);
@@ -132,7 +134,7 @@
               <button onClick={onClose} style={{ marginLeft: "auto", background: "#f5f5f5", border: "none", borderRadius: 8, padding: "4px 10px", cursor: "pointer", color: "#888" }}>✕</button>
             </div>
             <textarea ref={taRef} value={note} onChange={e => setNote(e.target.value)}
-              placeholder="備注（選填，留空直接送出）…" rows={3}
+              placeholder="備注（選填，留空直接送出）…" rows={rows || 3}
               style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: "1.5px solid #e0e0e0", fontSize: 14, resize: "none", fontFamily: "'Noto Sans TC', sans-serif", outline: "none", lineHeight: 1.6 }}
             />
             {showChips && (
@@ -844,6 +846,7 @@
                   : (noteTarget.habit.target_count > 1 ? `${noteTarget.habit.habit_name} · 第${noteTarget.slot}次` : `${noteTarget.habit.habit_name} · ${noteTarget.slot}`)}
                 icon={noteTarget.habit.emoji} existingNote={row && row.note}
                 onSubmit={handleNoteSubmit} onClose={() => setNoteTarget(null)}
+                rows={noteTarget.habit.habit_id === JOURNAL_HABIT_ID ? 10 : 3}
                 projects={noteTarget.habit.pinned ? null : projects}
                 selectedProjects={noteTarget.habit.project_ids}
                 onToggleProject={noteTarget.habit.pinned ? null : (pid) => toggleHabitProject(noteTarget.habit, pid)} />
