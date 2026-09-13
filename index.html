@@ -70,6 +70,11 @@
       if (freq === 'quarterly') return ctx.quarterKeyStr;
       return ctx.todayKey; // daily / daily-multi
     }
+    function shortDate(s) { const [, m, d] = s.split('-'); return `${Number(m)}/${Number(d)}`; }
+    function dateRangeLabel(h) {
+      if (!h.is_temporary || !h.start_date) return null;
+      return h.end_date && h.end_date !== h.start_date ? `${shortDate(h.start_date)} ～ ${shortDate(h.end_date)}` : shortDate(h.start_date);
+    }
     function formatDate(bp) {
       return new Date(Date.UTC(bp.year, bp.month - 1, bp.day)).toLocaleDateString("zh-TW", { timeZone: "UTC", month: "long", day: "numeric", weekday: "long" });
     }
@@ -135,7 +140,7 @@
       );
     }
 
-    function HabitRow({ icon, label, checked, note, pending, failed, onCheck, onNoteClick }) {
+    function HabitRow({ icon, label, sub, checked, note, pending, failed, onCheck, onNoteClick }) {
       return (
         <div style={{ borderRadius: 12, overflow: "hidden", border: `1.5px solid ${checked ? "#4caf7d" : "#e8e8e8"}`, background: checked ? "#eef7ee" : "#fafafa", transition: "all 0.18s" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px" }}>
@@ -148,6 +153,7 @@
             {failed && <span title="同步失敗" style={{ fontSize: 13 }}>⚠️</span>}
             <button onClick={onNoteClick} style={{ background: note ? "#fff3e0" : "#f5f5f5", border: `1px solid ${note ? "#f5a623" : "#e0e0e0"}`, borderRadius: 7, padding: "3px 8px", cursor: "pointer", fontSize: 12, color: note ? "#f5a623" : "#bbb", fontWeight: 600 }}>{note ? "📝 備注" : "＋備注"}</button>
           </div>
+          {sub && <div style={{ padding: "0 14px 9px 47px", marginTop: -4, fontSize: 11, color: "#aaa", lineHeight: 1.4 }}>{sub}</div>}
           {note && <div onClick={onNoteClick} style={{ padding: "5px 14px 10px 47px", fontSize: 12, color: "#888", cursor: "pointer", lineHeight: 1.5, borderTop: "1px solid #e8f5e9" }}>{note}</div>}
         </div>
       );
@@ -245,7 +251,7 @@
         const k = logKey(h.habit_id, periodKey, '');
         const row = logsByKey.get(k);
         return (
-          <HabitRow key={h.habit_id} icon={h.emoji} label={h.habit_name}
+          <HabitRow key={h.habit_id} icon={h.emoji} label={h.habit_name} sub={dateRangeLabel(h)}
             checked={!!(row && row.done)} note={row && row.note}
             pending={pendingKeys.has(h.habit_id + '|')} failed={failedKeys.has(h.habit_id + '|')}
             onCheck={() => onToggle(h, '')} onNoteClick={() => onEditNote(h, '')} />
