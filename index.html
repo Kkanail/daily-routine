@@ -89,9 +89,12 @@
     function logKey(habitId, periodKey, slot) { return `${habitId}|${periodKey}|${slot || ''}`; }
 
     // 期間型單次待辦（例如兩週內去領藥）：在區間內任何一天勾掉，之後的日子就不用再出現。
-    function doneBeforeToday(logsByKey, habitId, todayKey) {
+    // 有多個時段或一週 N 次的暫時項目（例如點一週眼藥）是區間內每天都要做，不適用「勾過就消失」。
+    function doneBeforeToday(logsByKey, habit, todayKey) {
+      const repeatsDaily = (habit.frequency_detail && habit.frequency_detail.length > 0) || (habit.target_count || 1) > 1;
+      if (repeatsDaily) return false;
       for (const l of logsByKey.values()) {
-        if (l.habit_id === habitId && l.done && l.date < todayKey) return true;
+        if (l.habit_id === habit.habit_id && l.done && l.date < todayKey) return true;
       }
       return false;
     }
@@ -313,7 +316,7 @@
       // 有指定日期區間的單次待辦：只看今天是否落在區間內，不管 pinned 或有沒有打過卡。
       const isVisible = (habit) => {
         if (habit.is_temporary && habit.start_date && habit.end_date) {
-          if (doneBeforeToday(logsByKey, habit.habit_id, ctx.todayKey)) return false;
+          if (doneBeforeToday(logsByKey, habit, ctx.todayKey)) return false;
           return ctx.todayKey >= habit.start_date && ctx.todayKey <= habit.end_date;
         }
         return habit.pinned || hasLogThisPeriod(habit);
@@ -955,7 +958,7 @@
         for (const h of dailyHabits) {
           const dated = h.is_temporary && h.start_date && h.end_date;
           const inRange = dated && ctx.todayKey >= h.start_date && ctx.todayKey <= h.end_date;
-          if (dated && (!inRange || doneBeforeToday(logsByKey, h.habit_id, ctx.todayKey))) continue;
+          if (dated && (!inRange || doneBeforeToday(logsByKey, h, ctx.todayKey))) continue;
           if (h.frequency_type === 'daily-multi' && h.frequency_detail.length > 0) {
             for (const slot of h.frequency_detail) {
               if (!h.pinned && !inRange && !logsByKey.has(logKey(h.habit_id, ctx.todayKey, slot))) continue;
